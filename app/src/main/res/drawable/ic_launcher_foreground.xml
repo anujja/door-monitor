@@ -1,0 +1,19 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- A simple door + indicator glyph, drawn within the inner 72dp safe zone. -->
+    <path
+        android:fillColor="#4FC3F7"
+        android:pathData="M40,30h28a2,2 0 0,1 2,2v44a2,2 0 0,1 -2,2h-28a2,2 0 0,1 -2,-2v-44a2,2 0 0,1 2,-2z" />
+    <path
+        android:fillColor="#0F1721"
+        android:pathData="M43,34h22v40h-22z" />
+    <path
+        android:fillColor="#4FC3F7"
+        android:pathData="M60,52m-2.5,0a2.5,2.5 0 1,0 5,0a2.5,2.5 0 1,0 -5,0" />
+    <path
+        android:fillColor="#81D4FA"
+        android:pathData="M50,22m-3,0a3,3 0 1,0 6,0a3,3 0 1,0 -6,0" />
+</vector>

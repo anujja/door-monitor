@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<full-backup-content>
+    <!-- Back up only the DataStore settings. Everything else (including WebView
+         cookies/credentials under app_webview/) is implicitly excluded. -->
+    <include domain="file" path="datastore/" />
+</full-backup-content>

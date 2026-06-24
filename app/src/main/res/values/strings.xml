@@ -1,0 +1,8 @@
+<resources>
+    <string name="app_name">Door Monitor</string>
+    <string name="kiosk_channel_name">Kiosk Service</string>
+    <string name="kiosk_channel_desc">Keeps the dashboard, MQTT and local API running.</string>
+    <string name="alert_channel_name">Tablet Alerts</string>
+    <string name="alert_channel_desc">Battery and connectivity warnings.</string>
+    <string name="notif_running">Door Monitor is running</string>
+</resources>

@@ -1,0 +1,116 @@
+# =============================================================================
+# Door Monitor — sample Home Assistant automations
+# Add to automations.yaml (UI: Settings ▸ Automations ▸ ⋮ ▸ Edit in YAML).
+# These use either the rest_command services (configuration.yaml) or MQTT.
+# =============================================================================
+
+# 1) Wake the tablet and show the front-door camera when motion is detected.
+- alias: "Tablet — wake on front door motion"
+  trigger:
+    - platform: state
+      entity_id: binary_sensor.front_door_motion
+      to: "on"
+  action:
+    - service: rest_command.doormonitor_wake_temporary
+      data:
+        seconds: 45
+    - service: rest_command.doormonitor_show_camera
+      data:
+        camera_id: front_door
+  mode: restart
+
+# 2) Doorbell press → wake + doorbell camera + brighten.
+- alias: "Tablet — doorbell press"
+  trigger:
+    - platform: state
+      entity_id: binary_sensor.doorbell_button
+      to: "on"
+  action:
+    - service: rest_command.doormonitor_brightness
+      data:
+        value: 255
+    - service: rest_command.doormonitor_doorbell_event
+  mode: restart
+
+# 3) Equivalent doorbell wake using MQTT instead of the HTTP API.
+- alias: "Tablet — doorbell via MQTT"
+  trigger:
+    - platform: state
+      entity_id: binary_sensor.doorbell_button
+      to: "on"
+  action:
+    - service: mqtt.publish
+      data:
+        topic: "doormonitor/command/doorbell"
+        payload: "press"
+  mode: restart
+
+# 4) Night mode: dim and sleep the screen at 23:00.
+- alias: "Tablet — night sleep"
+  trigger:
+    - platform: time
+      at: "23:00:00"
+  action:
+    - service: rest_command.doormonitor_screen_off
+  mode: single
+
+# 5) Morning: wake and brighten at 06:30.
+- alias: "Tablet — morning wake"
+  trigger:
+    - platform: time
+      at: "06:30:00"
+  action:
+    - service: rest_command.doormonitor_screen_on
+    - service: rest_command.doormonitor_brightness
+      data:
+        value: 200
+  mode: single
+
+# 6) Battery protection: cut power to a smart plug when Door Monitor reports the
+#    high-battery warning (battery stuck high for too long), restore at 70%.
+- alias: "Tablet — stop charging when full too long"
+  trigger:
+    - platform: state
+      entity_id: binary_sensor.door_monitor_battery_high_warning
+      to: "on"
+  action:
+    - service: switch.turn_off
+      target:
+        entity_id: switch.tablet_charger_plug
+  mode: single
+
+- alias: "Tablet — resume charging at 70%"
+  trigger:
+    - platform: numeric_state
+      entity_id: sensor.door_monitor_battery
+      below: 70
+  action:
+    - service: switch.turn_on
+      target:
+        entity_id: switch.tablet_charger_plug
+  mode: single
+
+# 7) Also reacts to the outbound HA event the app fires for the battery warning.
+- alias: "Tablet — battery warning event"
+  trigger:
+    - platform: event
+      event_type: door_monitor_battery_warning
+  condition:
+    - condition: template
+      value_template: "{{ trigger.event.data.active }}"
+  action:
+    - service: notify.mobile_app_phone
+      data:
+        title: "Wall tablet battery"
+        message: "Battery has been highly charged for a long time."
+  mode: single
+
+# 8) Reload the dashboard after a Home Assistant restart.
+- alias: "Tablet — reload dashboard on HA start"
+  trigger:
+    - platform: homeassistant
+      event: start
+  action:
+    - delay: "00:00:30"
+    - service: rest_command.doormonitor_reload
+  mode: single

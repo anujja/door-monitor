@@ -1,0 +1,93 @@
+# =============================================================================
+# Door Monitor — Home Assistant configuration examples
+# Add the relevant parts to your HA `configuration.yaml` (or split via !include).
+# Replace 192.168.1.50 with your tablet's IP, and 2323 with your API port.
+# If you set an API password, append ?password=YOURPASS to each URL.
+# =============================================================================
+
+# ---- Local HTTP API as rest_command services -------------------------------
+rest_command:
+  doormonitor_screen_on:
+    url: "http://192.168.1.50:2323/screenOn"
+    method: GET
+  doormonitor_screen_off:
+    url: "http://192.168.1.50:2323/screenOff"
+    method: GET
+  doormonitor_wake:
+    url: "http://192.168.1.50:2323/wake"
+    method: GET
+  doormonitor_wake_temporary:
+    url: "http://192.168.1.50:2323/wake?seconds={{ seconds | default(30) }}"
+    method: GET
+  doormonitor_sleep:
+    url: "http://192.168.1.50:2323/sleep"
+    method: GET
+  doormonitor_reload:
+    url: "http://192.168.1.50:2323/reload"
+    method: GET
+  doormonitor_brightness:
+    url: "http://192.168.1.50:2323/brightness?value={{ value }}"
+    method: GET
+  doormonitor_show_camera:
+    url: "http://192.168.1.50:2323/camera?id={{ camera_id }}"
+    method: GET
+  doormonitor_motion_event:
+    url: "http://192.168.1.50:2323/event?type=motion"
+    method: GET
+  doormonitor_doorbell_event:
+    url: "http://192.168.1.50:2323/event?type=doorbell"
+    method: GET
+
+# ---- Optional REST status sensor -------------------------------------------
+sensor:
+  - platform: rest
+    name: "Door Monitor Status"
+    resource: "http://192.168.1.50:2323/status"
+    method: GET
+    scan_interval: 60
+    value_template: "{{ value_json.batteryLevel }}"
+    unit_of_measurement: "%"
+    json_attributes:
+      - screenOn
+      - batteryCharging
+      - batteryHealth
+      - batteryTemperatureC
+      - plugged
+      - highBatteryWarning
+      - model
+      - androidVersion
+
+# =============================================================================
+# MQTT
+# -----------------------------------------------------------------------------
+# When MQTT is enabled in the app, Door Monitor publishes Home Assistant MQTT
+# *discovery* configs automatically. With the MQTT integration installed in HA,
+# these entities appear with NO YAML needed:
+#   - switch.door_monitor_screen          (screen on/off)
+#   - number.door_monitor_brightness      (0-255)
+#   - sensor.door_monitor_battery         (%)
+#   - binary_sensor.door_monitor_battery_high_warning
+#
+# You only need the MQTT integration configured and pointing at the same broker
+# the app connects to. The manual definitions below are OPTIONAL fallbacks if
+# you prefer explicit YAML or disabled discovery.
+# =============================================================================
+
+# mqtt:
+#   switch:
+#     - name: "Door Monitor Screen"
+#       unique_id: doormonitor_screen_manual
+#       command_topic: "doormonitor/command/screen"
+#       state_topic: "doormonitor/state"
+#       value_template: "{{ 'ON' if value_json.screenOn else 'OFF' }}"
+#       payload_on: "ON"
+#       payload_off: "OFF"
+#       availability_topic: "doormonitor/availability"
+#   sensor:
+#     - name: "Door Monitor Battery"
+#       unique_id: doormonitor_battery_manual
+#       state_topic: "doormonitor/state"
+#       value_template: "{{ value_json.batteryLevel }}"
+#       unit_of_measurement: "%"
+#       device_class: battery
+#       availability_topic: "doormonitor/availability"

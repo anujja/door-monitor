@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<data-extraction-rules>
+    <!-- Only DataStore settings are transferable; WebView cookies/credentials are
+         implicitly excluded since they are not in an included path. -->
+    <cloud-backup>
+        <include domain="file" path="datastore/" />
+    </cloud-backup>
+    <device-transfer>
+        <include domain="file" path="datastore/" />
+    </device-transfer>
+</data-extraction-rules>

@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Door Monitor is a LAN appliance: it normally talks to a local Home Assistant and to
+  cameras that are frequently served over PLAIN HTTP / MJPEG / RTSP on a trusted home
+  network. Blocking cleartext entirely makes a typical `http://homeassistant.local:8123`
+  dashboard fail to load (net::ERR_CLEARTEXT_NOT_PERMITTED → black screen).
+
+  Therefore cleartext is PERMITTED by default here. If you run Home Assistant and all your
+  cameras over HTTPS and want to harden the device, set cleartextTrafficPermitted="false"
+  below (optionally adding per-host <domain-config> exceptions) and rebuild.
+
+  TLS certificate errors are never silently bypassed by the app; a self-signed HA cert will
+  show an error overlay asking you to trust your CA or use a valid certificate.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+            <!-- Uncomment to also trust user-installed CAs (e.g. your internal HA CA):
+            <certificates src="user" /> -->
+        </trust-anchors>
+    </base-config>
+
+    <!-- Example hardened alternative: deny cleartext globally but allow a specific host.
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors><certificates src="system" /></trust-anchors>
+    </base-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="true">homeassistant.local</domain>
+        <domain includeSubdomains="true">192.168.1.10</domain>
+    </domain-config>
+    -->
+</network-security-config>
