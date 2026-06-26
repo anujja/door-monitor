@@ -22,8 +22,9 @@
     <!-- Reliability: auto-start after boot, keep a long-running service. -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <!-- specialUse: an always-on kiosk bridge. dataSync is NOT used because Android 15 caps
+         it at ~6h/24h, which crashes a 24/7 service ("Time limit already exhausted"). -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <!-- Battery monitoring -->
@@ -84,7 +85,11 @@
             android:name=".service.KioskForegroundService"
             android:exported="false"
             android:stopWithTask="false"
-            android:foregroundServiceType="dataSync|mediaPlayback" />
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Always-on Home Assistant wall-tablet kiosk: keeps the local MQTT and HTTP control APIs, instant screen wake, and battery monitoring running 24/7." />
+        </service>
 
         <!-- Auto-start after boot. -->
         <receiver

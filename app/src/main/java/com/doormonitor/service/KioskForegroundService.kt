@@ -50,7 +50,7 @@ class KioskForegroundService : LifecycleService() {
 
     override fun onCreate() {
         super.onCreate()
-        startForegroundCompat()
+        startForegroundSafely()
 
         repo = SettingsRepository(applicationContext)
         screen = ScreenController(applicationContext, lifecycleScope)
@@ -170,6 +170,20 @@ class KioskForegroundService : LifecycleService() {
         }
     }
 
+    /**
+     * Start in the foreground, but never let a foreground-start restriction crash the process
+     * (which would crash-loop via START_STICKY/watchdog). If it fails, log and stop cleanly so
+     * the watchdog can retry later from an allowed context.
+     */
+    private fun startForegroundSafely() {
+        try {
+            startForegroundCompat()
+        } catch (t: Throwable) {
+            Log.e(TAG, "startForeground failed; stopping to avoid a crash loop", t)
+            stopSelf()
+        }
+    }
+
     private fun startForegroundCompat() {
         val openApp = PendingIntent.getActivity(
             this, 0,
@@ -185,16 +199,13 @@ class KioskForegroundService : LifecycleService() {
             .setPriority(NotificationCompat.PRIORITY_MIN)
             .build()
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(
-                NOTIF_SERVICE_ID,
-                notification,
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC or
-                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
-            )
-        } else {
-            startForeground(NOTIF_SERVICE_ID, notification)
-        }
+        // specialUse has no per-day time limit, unlike dataSync on Android 15 which crashes a
+        // perpetual service with "Time limit already exhausted". (minSdk 34 supports this type.)
+        startForeground(
+            NOTIF_SERVICE_ID,
+            notification,
+            ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+        )
     }
 
     override fun onDestroy() {
