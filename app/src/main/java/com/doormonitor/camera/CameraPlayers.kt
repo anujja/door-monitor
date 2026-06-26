@@ -69,7 +69,7 @@ private fun VlcSurface(camera: CameraDef, modifier: Modifier) {
         factory = { ctx ->
             val args = arrayListOf(
                 "--rtsp-tcp",           // RTSP over TCP: reliable on Wi-Fi
-                "--network-caching=300",
+                "--network-caching=300", // stable buffer (lower values stutter on 5MP/Wi-Fi)
                 "--no-audio",           // wall tablet: muted by default
                 "--avcodec-hw=any"
             )

@@ -33,6 +33,7 @@ import com.doormonitor.camera.CameraActivity
 import com.doormonitor.camera.PrewarmCameraOverlay
 import com.doormonitor.core.KioskBus
 import com.doormonitor.core.KioskCommand
+import com.doormonitor.data.CameraType
 import com.doormonitor.kiosk.KioskController
 import com.doormonitor.service.KioskForegroundService
 import com.doormonitor.ui.DashboardScreen
@@ -100,10 +101,13 @@ class MainActivity : ComponentActivity() {
                     return@DoorMonitorTheme
                 }
 
-                // The camera to keep pre-warmed (must be a defined camera with a non-blank id).
+                // The camera to keep pre-warmed in the on-dashboard overlay. Only WEBRTC cameras
+                // use the overlay (their connection setup is slow, so warming pays off). RTSP/
+                // HLS/MJPEG cameras are shown via the full-screen CameraActivity (native libVLC),
+                // which renders reliably; they ignore the pre-warm setting.
                 val prewarmCamera = remember(s.cameras, s.prewarmCameraId) {
                     s.prewarmCameraId.takeIf { it.isNotBlank() }?.let { id ->
-                        s.cameras.firstOrNull { it.id == id }
+                        s.cameras.firstOrNull { it.id == id && it.type == CameraType.WEBRTC }
                     }
                 }
 

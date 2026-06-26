@@ -22,16 +22,13 @@ import androidx.compose.ui.viewinterop.AndroidView
 import com.doormonitor.data.CameraDef
 
 /**
- * A persistent, pre-warmed WebRTC camera surface.
+ * Persistent, pre-warmed overlay for a **WebRTC** camera. The WebView is created once and kept
+ * attached for the whole time this is composed (even while hidden, shrunk to ~1dp and
+ * transparent) so the WebRTC connection stays warm and toggling [visible] shows it instantly.
  *
- * The WebView is created once and **kept attached to the window for the whole time this
- * composable is present** — even when [visible] is false (it is just shrunk to ~1dp and made
- * transparent). That keeps the go2rtc WebRTC peer connection alive and decoding, so toggling
- * [visible] to true shows the live feed instantly, with none of the per-open negotiation delay
- * that a freshly-created WebView incurs.
- *
- * Trade-off: the stream decodes continuously while configured, which uses some CPU/power on the
- * (permanently powered) tablet. It is therefore opt-in via the "pre-warm camera" setting.
+ * RTSP/MJPEG/HLS cameras are NOT handled here — they are shown via the full-screen
+ * [CameraActivity] (native libVLC), which renders reliably with correct aspect ratio and
+ * without the surface-compositing issues of embedding a video surface in a toggled overlay.
  */
 @Composable
 fun PrewarmCameraOverlay(
@@ -39,13 +36,11 @@ fun PrewarmCameraOverlay(
     visible: Boolean,
     onClose: () -> Unit
 ) {
-    // Hold the WebView across recompositions and destroy it only when this leaves composition
-    // (e.g. the pre-warm camera setting is cleared).
-    val webViewHolder = remember { WebViewHolder() }
+    val holder = remember { WebViewHolder() }
     DisposableEffect(Unit) {
         onDispose {
-            webViewHolder.webView?.apply { stopLoading(); destroy() }
-            webViewHolder.webView = null
+            holder.webView?.apply { stopLoading(); destroy() }
+            holder.webView = null
         }
     }
 
@@ -53,21 +48,12 @@ fun PrewarmCameraOverlay(
         modifier = if (visible) {
             Modifier.fillMaxSize().background(Color.Black)
         } else {
-            // Still attached and decoding, but effectively invisible and out of the way.
             Modifier.size(1.dp).alpha(0f)
         }
     ) {
         AndroidView(
             modifier = Modifier.fillMaxSize(),
-            factory = { ctx ->
-                buildWebRtcWebView(ctx, camera.url).also { webViewHolder.webView = it }
-            },
-            update = { wv ->
-                // Reconnect if the camera URL changed while pre-warmed.
-                if (wv.url == null || (wv.url != camera.url && !wv.url!!.startsWith(camera.url))) {
-                    wv.loadUrl(camera.url)
-                }
-            }
+            factory = { ctx -> buildWebRtcWebView(ctx, camera.url).also { holder.webView = it } }
         )
 
         if (visible) {
