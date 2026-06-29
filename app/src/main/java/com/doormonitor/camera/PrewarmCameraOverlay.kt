@@ -12,7 +12,12 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -39,9 +44,19 @@ fun PrewarmCameraOverlay(
     val holder = remember { WebViewHolder() }
     DisposableEffect(Unit) {
         onDispose {
-            holder.webView?.apply { stopLoading(); destroy() }
+            holder.webView?.apply { streamWatchdog?.stop(); stopLoading(); destroy() }
             holder.webView = null
         }
+    }
+
+    // Recreating the WebView (key bump) is how we recover from a dead render process.
+    var recreateKey by remember { mutableIntStateOf(0) }
+
+    // Only enforce stall detection while actually on-screen: the offscreen/shrunk WebView throttles
+    // frame callbacks, and a freeze that happened while hidden gets corrected within a few seconds
+    // of the feed coming back on-screen — when it actually matters.
+    LaunchedEffect(visible, recreateKey) {
+        holder.webView?.streamWatchdog?.setEnforcing(visible)
     }
 
     Box(
@@ -51,10 +66,19 @@ fun PrewarmCameraOverlay(
             Modifier.size(1.dp).alpha(0f)
         }
     ) {
-        AndroidView(
-            modifier = Modifier.fillMaxSize(),
-            factory = { ctx -> buildWebRtcWebView(ctx, camera.url).also { holder.webView = it } }
-        )
+        key(recreateKey) {
+            AndroidView(
+                modifier = Modifier.fillMaxSize(),
+                factory = { ctx ->
+                    buildWebRtcWebView(
+                        ctx,
+                        camera.url,
+                        enforceLiveness = visible,
+                        onRenderGone = { holder.webView = null; recreateKey++ }
+                    ).also { holder.webView = it }
+                }
+            )
+        }
 
         if (visible) {
             IconButton(

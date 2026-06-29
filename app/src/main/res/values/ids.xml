@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- View tag key used to attach a StreamLivenessWatchdog to a WebRTC WebView. -->
+    <item name="tag_stream_watchdog" type="id" />
+</resources>

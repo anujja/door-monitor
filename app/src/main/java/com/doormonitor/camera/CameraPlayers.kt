@@ -3,15 +3,23 @@ package com.doormonitor.camera
 import android.annotation.SuppressLint
 import android.net.Uri
 import android.view.ViewGroup
+import android.webkit.RenderProcessGoneDetail
 import android.webkit.WebView
+import android.webkit.WebViewClient
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.MediaItem
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
+import com.doormonitor.R
 import com.doormonitor.data.CameraDef
 import com.doormonitor.data.CameraType
 import org.videolan.libvlc.LibVLC
@@ -101,20 +109,37 @@ private fun VlcSurface(camera: CameraDef, modifier: Modifier) {
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
 private fun WebRtcSurface(camera: CameraDef, modifier: Modifier) {
-    AndroidView(
-        modifier = modifier,
-        factory = { ctx -> buildWebRtcWebView(ctx, camera.url) },
-        onRelease = { it.destroy() }
-    )
+    // Recreating the WebView (key bump) is how we recover from a dead render process.
+    var recreateKey by remember { mutableIntStateOf(0) }
+    key(recreateKey) {
+        AndroidView(
+            modifier = modifier,
+            // Full-screen view is always visible, so enforce liveness for its whole lifetime.
+            factory = { ctx ->
+                buildWebRtcWebView(ctx, camera.url, enforceLiveness = true) { recreateKey++ }
+            },
+            onRelease = { it.streamWatchdog?.stop(); it.destroy() }
+        )
+    }
 }
 
 /**
- * Creates a WebView configured for a go2rtc/WebRTC camera page and starts loading it.
- * Shared by the full-screen [CameraActivity] surface and the persistent pre-warm overlay so
- * both behave identically.
+ * Creates a WebView configured for a go2rtc/WebRTC camera page and starts loading it. Shared by
+ * the full-screen [CameraActivity] surface and the persistent pre-warm overlay so both behave
+ * identically. A [StreamLivenessWatchdog] is attached (retrievable via [streamWatchdog]) that
+ * reloads the page when the WebRTC video stalls, and [onRenderGone] fires if the render process
+ * dies so the host can recreate the view.
+ *
+ * @param enforceLiveness whether stall detection is active immediately (true for the always-visible
+ *        full-screen view; the pre-warm overlay passes false and toggles it with visibility).
  */
 @SuppressLint("SetJavaScriptEnabled")
-fun buildWebRtcWebView(context: android.content.Context, url: String): WebView =
+fun buildWebRtcWebView(
+    context: android.content.Context,
+    url: String,
+    enforceLiveness: Boolean = true,
+    onRenderGone: () -> Unit = {}
+): WebView =
     WebView(context).apply {
         settings.javaScriptEnabled = true
         settings.domStorageEnabled = true
@@ -124,8 +149,34 @@ fun buildWebRtcWebView(context: android.content.Context, url: String): WebView =
             ViewGroup.LayoutParams.MATCH_PARENT,
             ViewGroup.LayoutParams.MATCH_PARENT
         )
+
+        val watchdog = StreamLivenessWatchdog(this)
+        setTag(R.id.tag_stream_watchdog, watchdog)
+
+        webViewClient = object : WebViewClient() {
+            override fun onPageFinished(view: WebView, finishedUrl: String?) {
+                StreamLivenessWatchdog.injectInto(view)
+            }
+
+            override fun onRenderProcessGone(
+                view: WebView,
+                detail: RenderProcessGoneDetail?
+            ): Boolean {
+                watchdog.stop()
+                view.destroy()
+                onRenderGone()
+                return true
+            }
+        }
+
+        watchdog.start()
+        watchdog.setEnforcing(enforceLiveness)
         loadUrl(url)
     }
+
+/** The [StreamLivenessWatchdog] attached by [buildWebRtcWebView], if any. */
+val WebView.streamWatchdog: StreamLivenessWatchdog?
+    get() = getTag(R.id.tag_stream_watchdog) as? StreamLivenessWatchdog
 
 /** Simple mutable container so VLC native objects survive recomposition. */
 private class VlcHolder {

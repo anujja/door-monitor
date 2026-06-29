@@ -16,6 +16,8 @@ import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import com.doormonitor.BuildConfig
+import com.doormonitor.R
+import com.doormonitor.camera.StreamLivenessWatchdog
 
 /**
  * Builds and configures the kiosk WebView. Responsibilities:
@@ -92,6 +94,16 @@ object DashboardWebViewFactory {
             setAcceptThirdPartyCookies(webView, true)
         }
 
+        // Recover an embedded camera card (e.g. go2rtc WebRTC) that freezes on a frame. The
+        // timeout is long and a full page reload is heavy, so the watchdog only acts once a video
+        // has actually been progressing and then stalls (see StreamLivenessWatchdog.seenLive).
+        val watchdog = StreamLivenessWatchdog(
+            webView,
+            stallTimeoutMs = DASHBOARD_STALL_TIMEOUT_MS,
+            tag = "DashboardStreamWatchdog"
+        )
+        webView.setTag(R.id.tag_stream_watchdog, watchdog)
+
         webView.webViewClient = object : WebViewClient() {
             override fun onPageStarted(view: WebView, url: String?, favicon: Bitmap?) {
                 CookieManager.getInstance().flush()
@@ -102,6 +114,7 @@ object DashboardWebViewFactory {
                 CookieManager.getInstance().flush()
                 // Inject CSS to suppress text selection and overscroll glow (pull-refresh).
                 view.evaluateJavascript(KIOSK_CSS_INJECTION, null)
+                StreamLivenessWatchdog.injectInto(view)
             }
 
             override fun onReceivedError(
@@ -156,6 +169,7 @@ object DashboardWebViewFactory {
             ): Boolean {
                 Log.e(TAG, "WebView render process gone; didCrash=${detail?.didCrash()}")
                 // Must destroy the dead WebView; host recreates.
+                watchdog.stop()
                 view.destroy()
                 onRenderGone()
                 return true
@@ -163,8 +177,13 @@ object DashboardWebViewFactory {
         }
 
         webView.webChromeClient = WebChromeClient()
+        watchdog.start()
+        watchdog.setEnforcing(true)
         return webView
     }
+
+    /** Stalled-video timeout for the dashboard; long because reloading the whole HA page is heavy. */
+    private const val DASHBOARD_STALL_TIMEOUT_MS = 15_000L
 
     private fun sslErrorText(primaryError: Int): String = when (primaryError) {
         android.net.http.SslError.SSL_UNTRUSTED -> "untrusted certificate"
