@@ -17,13 +17,17 @@ import com.doormonitor.R
 import com.doormonitor.SettingsHolder
 import com.doormonitor.battery.BatteryMonitor
 import com.doormonitor.core.CommandHandler
+import com.doormonitor.core.DiskLog
+import com.doormonitor.core.WebViewHealth
 import com.doormonitor.data.AppSettings
 import com.doormonitor.data.SettingsRepository
 import com.doormonitor.ha.HomeAssistantClient
 import com.doormonitor.http.LocalHttpServer
 import com.doormonitor.mqtt.MqttManager
 import com.doormonitor.screen.ScreenController
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 /**
@@ -50,6 +54,7 @@ class KioskForegroundService : LifecycleService() {
 
     override fun onCreate() {
         super.onCreate()
+        DiskLog.i(TAG, "service onCreate")
         startForegroundSafely()
 
         repo = SettingsRepository(applicationContext)
@@ -68,7 +73,44 @@ class KioskForegroundService : LifecycleService() {
         mqtt = MqttManager(handler)
 
         observeSettings()
+        startHeartbeat()
         KioskWatchdog.schedule(applicationContext)
+    }
+
+    /**
+     * Periodic health snapshot to the persistent log. The point is the *run-up*: when the kiosk
+     * next freezes we want the minutes before it, not just the moment of failure. Cheap enough to
+     * leave on forever (one line a minute; DiskLog rotates at 512 KiB).
+     */
+    private fun startHeartbeat() {
+        lifecycleScope.launch {
+            while (isActive) {
+                runCatching { DiskLog.i(TAG, "heartbeat ${snapshot()}") }
+                delay(HEARTBEAT_INTERVAL_MS)
+            }
+        }
+    }
+
+    private fun snapshot(): String {
+        val pm = getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
+        val rt = Runtime.getRuntime()
+        val usedMb = (rt.totalMemory() - rt.freeMemory()) / (1024 * 1024)
+        val net = runCatching {
+            val cm = getSystemService(Context.CONNECTIVITY_SERVICE)
+                as android.net.ConnectivityManager
+            val caps = cm.getNetworkCapabilities(cm.activeNetwork)
+            when {
+                caps == null -> "none"
+                caps.hasCapability(
+                    android.net.NetworkCapabilities.NET_CAPABILITY_VALIDATED
+                ) -> "validated"
+                else -> "unvalidated"
+            }
+        }.getOrDefault("unknown")
+
+        return "mqtt=${if (mqtt.connected) "up" else "DOWN"} net=$net " +
+            "screen=${if (pm.isInteractive) "on" else "off"} " +
+            "battery=${battery.current.level}% heap=${usedMb}MB ${WebViewHealth.summary()}"
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -210,6 +252,9 @@ class KioskForegroundService : LifecycleService() {
 
     override fun onDestroy() {
         super.onDestroy()
+        // If this shows up in the log without a force-close behind it, the OS killed us — worth
+        // knowing, since it means the watchdog (not START_STICKY) is what brought us back.
+        DiskLog.w(TAG, "service onDestroy")
         httpServer?.stop()
         mqtt.disconnect()
         battery.stop()
@@ -219,6 +264,7 @@ class KioskForegroundService : LifecycleService() {
         private const val TAG = "KioskService"
         private const val NOTIF_SERVICE_ID = 1001
         private const val NOTIF_ALERT_ID = 1002
+        private const val HEARTBEAT_INTERVAL_MS = 60_000L
 
         /** Safe start: foreground from boot/Activity contexts. */
         fun start(context: Context) {

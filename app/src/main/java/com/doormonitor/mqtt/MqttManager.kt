@@ -2,6 +2,7 @@ package com.doormonitor.mqtt
 
 import android.util.Log
 import com.doormonitor.core.CommandHandler
+import com.doormonitor.core.DiskLog
 import com.doormonitor.data.AppSettings
 import com.hivemq.client.mqtt.MqttClient
 import com.hivemq.client.mqtt.datatypes.MqttQos
@@ -52,10 +53,13 @@ class MqttManager(
             .serverHost(settings.mqttHost)
             .serverPort(settings.mqttPort)
             .automaticReconnectWithDefaultConfig()
-            .addConnectedListener { Log.i(TAG, "MQTT connected"); onConnected(settings) }
+            .addConnectedListener {
+                DiskLog.i(TAG, "MQTT connected to ${settings.mqttHost}:${settings.mqttPort}")
+                onConnected(settings)
+            }
             .addDisconnectedListener {
                 connected = false
-                Log.w(TAG, "MQTT disconnected: ${it.cause.message}")
+                DiskLog.w(TAG, "MQTT disconnected: ${it.cause.message} (source=${it.source})")
             }
 
         if (settings.mqttUseTls) builder.sslWithDefaultConfig()
@@ -108,7 +112,7 @@ class MqttManager(
         val topic = publish.topic.toString()
         val payload = publish.payloadAsBytes.toString(StandardCharsets.UTF_8).trim()
         val cmd = topic.removePrefix("$base/command/")
-        Log.i(TAG, "MQTT command: $cmd = '$payload'")
+        DiskLog.i(TAG, "MQTT command: $cmd = '$payload'")
         when (cmd) {
             "screen" -> if (payload.equals("OFF", true)) handler.screenOff() else handler.screenOn()
             "brightness" -> payload.toIntOrNull()?.let { handler.setBrightness(it) }

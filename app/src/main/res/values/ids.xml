@@ -2,4 +2,6 @@
 <resources>
     <!-- View tag key used to attach a StreamLivenessWatchdog to a WebRTC WebView. -->
     <item name="tag_stream_watchdog" type="id" />
+    <!-- View tag key used to attach a WebViewHealthWatchdog to the dashboard WebView. -->
+    <item name="tag_health_watchdog" type="id" />
 </resources>

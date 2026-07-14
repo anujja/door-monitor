@@ -4,6 +4,7 @@ import android.app.Application
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.os.Build
+import com.doormonitor.core.DiskLog
 
 /**
  * Application entry point. Creates notification channels. The long-running work lives in
@@ -14,6 +15,9 @@ class DoorMonitorApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        // First thing: the failures worth diagnosing are hangs that leave no crash log, and
+        // logcat has long since rotated by the time anyone notices. See [DiskLog].
+        DiskLog.init(this)
         createChannels()
     }
 
