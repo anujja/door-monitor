@@ -3,41 +3,67 @@ package com.doormonitor.camera
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
-import android.util.Log
 import android.webkit.WebView
+import com.doormonitor.core.DiskLog
 
 /**
- * Detects a stalled WebRTC video inside a [WebView] and forces a reconnect by reloading the
- * page. This exists because a go2rtc WebRTC feed can silently die (Wi-Fi blip, ICE timeout,
- * server restart) while the `<video>` element keeps painting its last decoded frame forever —
- * the only thing that previously recovered it was destroying the WebView (force-closing the app).
+ * Detects a stalled WebRTC video inside a [WebView] and forces a reconnect by reloading the page.
+ * A go2rtc WebRTC feed dies silently in two ways, both observed on the door camera:
+ *  - it connects, then the media flow stops (the video track goes `muted`) — usually after the
+ *    pre-warm WebView was hidden/throttled — and the `<video>` freezes on its last frame;
+ *  - it connects but never delivers a single frame, so the `<video>` shows only its placeholder
+ *    play-button poster (`currentTime` stuck at 0, `videoWidth` 0).
+ * In both cases the only recovery is reloading the page; go2rtc's own page does not self-heal.
  *
- * The decision of *whether* the stream is stalled is made here, in native code on a main-thread
- * [Handler] ticker, on purpose: Android/Chromium throttles JS timers in offscreen / low-visibility
- * WebViews (exactly the pre-warm-hidden case), so a pure-JS watchdog could freeze along with the
- * stream. The injected JS ([WATCH_JS]) only maintains an event-driven, per-decoded-frame counter;
- * the native ticker polls it.
+ * Liveness is judged natively, on a main-thread [Handler] ticker, by polling the video element's
+ * `currentTime`: a decoding stream advances it every tick, a stalled one does not. This is
+ * deliberately self-contained — a single [evaluateJavascript] expression per poll, with no state
+ * injected into the page. An earlier design injected a `requestVideoFrameCallback` frame counter,
+ * but that counter (a) is wiped whenever go2rtc reloads the page to reconnect and (b) can never
+ * advance for a stream that never delivers a first frame, so it could not see the second stall
+ * above at all. Reading `currentTime` needs nothing injected and covers both cases.
+ *
+ * The ticker runs on the main thread on purpose: Android/Chromium throttles JS timers in
+ * offscreen / low-visibility WebViews (the pre-warm-hidden case), so a pure-JS watchdog could
+ * freeze along with the stream.
  */
 class StreamLivenessWatchdog(
     private val webView: WebView,
+    private val mode: Mode = Mode.ALWAYS_EXPECT_VIDEO,
     private val stallTimeoutMs: Long = STALL_TIMEOUT_MS,
     private val reloadCooldownMs: Long = RELOAD_COOLDOWN_MS,
     private val tag: String = "StreamWatchdog"
 ) {
+    enum class Mode {
+        /**
+         * A dedicated camera page: a live stream is always expected. Reload whenever the video is
+         * not advancing for longer than [stallTimeoutMs] — including a stream that connects but
+         * never delivers its first frame.
+         */
+        ALWAYS_EXPECT_VIDEO,
+
+        /**
+         * An embedded page that may legitimately have no (or an idle) video, e.g. a Home Assistant
+         * dashboard without a camera card. Only reload a video that was progressing and then
+         * stalled; never reload a page that simply never had a live video.
+         */
+        ONLY_IF_WAS_LIVE
+    }
+
     private val handler = Handler(Looper.getMainLooper())
 
     // Whether stalls should currently trigger a reload. Gated by visibility for the pre-warm
-    // overlay so throttled frame callbacks while hidden can't cause false reloads.
+    // overlay so throttled frame delivery while hidden can't cause false reloads.
     private var enforcing = false
     private var running = false
 
-    // Last liveness value seen from JS, and when it last advanced.
-    private var lastLiveness: Long? = null
-    private var lastProgressAt = 0L
+    // Last `currentTime` (ms) seen, and when it last advanced. `lastProgress < 0` means we have
+    // no baseline yet (just started/reset), so the next poll only records, it does not judge.
+    private var lastProgress = -1L
+    private var lastLiveAt = 0L
     private var lastReloadAt = 0L
 
-    // Latch: only reload once we've actually seen a video progressing. Prevents reloading pages
-    // that simply have no video (e.g. a Home Assistant dashboard without a camera card).
+    // ONLY_IF_WAS_LIVE latch: have we ever seen this video actually progress?
     private var seenLive = false
 
     private val tick = object : Runnable {
@@ -72,32 +98,51 @@ class StreamLivenessWatchdog(
     }
 
     private fun resetWindow() {
-        lastLiveness = null
-        lastProgressAt = SystemClock.uptimeMillis()
-        seenLive = false
+        lastProgress = -1L
+        lastLiveAt = SystemClock.uptimeMillis()
     }
 
     private fun poll() {
-        webView.evaluateJavascript(LIVENESS_EXPR) { result ->
-            if (!running || !enforcing) return@evaluateJavascript
-            val value = result?.trim('"')?.toLongOrNull()
-            val now = SystemClock.uptimeMillis()
-            if (value != null && value > 0L) {
-                seenLive = true
-                if (value != lastLiveness) {
-                    lastLiveness = value
-                    lastProgressAt = now
+        runCatching {
+            webView.evaluateJavascript(PROGRESS_EXPR) { result ->
+                if (!running || !enforcing) return@evaluateJavascript
+                val progress = result?.trim('"')?.toLongOrNull() ?: return@evaluateJavascript
+                val now = SystemClock.uptimeMillis()
+
+                // First poll after a (re)start: establish a baseline, don't judge yet.
+                if (lastProgress < 0) {
+                    lastProgress = progress
+                    lastLiveAt = now
                     return@evaluateJavascript
                 }
-            }
-            // Only treat a lack of progress as a stall once a video was actually live; otherwise a
-            // page with no video would reload forever.
-            if (!seenLive) return@evaluateJavascript
-            if (now - lastProgressAt > stallTimeoutMs && now - lastReloadAt > reloadCooldownMs) {
-                Log.w(tag, "Stream stalled ${now - lastProgressAt}ms; reloading WebView to reconnect")
-                lastReloadAt = now
-                resetWindow()
-                webView.reload()
+
+                // currentTime jumped backwards: the page reloaded itself to reconnect (go2rtc
+                // does this) and playback restarted from 0. Re-baseline rather than mistaking the
+                // reset for a stall.
+                if (progress < lastProgress) {
+                    lastProgress = progress
+                    lastLiveAt = now
+                    return@evaluateJavascript
+                }
+
+                if (progress > lastProgress) {
+                    lastProgress = progress
+                    lastLiveAt = now
+                    seenLive = true
+                    return@evaluateJavascript
+                }
+
+                // Not advancing. Skip a page that never had a live video when the mode says so
+                // (avoids reloading a cameraless dashboard forever).
+                if (mode == Mode.ONLY_IF_WAS_LIVE && !seenLive) return@evaluateJavascript
+
+                if (now - lastLiveAt > stallTimeoutMs && now - lastReloadAt > reloadCooldownMs) {
+                    DiskLog.w(tag, "stream stalled ${now - lastLiveAt}ms; reloading to reconnect")
+                    lastReloadAt = now
+                    resetWindow()
+                    seenLive = false
+                    webView.reload()
+                }
             }
         }
     }
@@ -107,57 +152,14 @@ class StreamLivenessWatchdog(
         const val RELOAD_COOLDOWN_MS = 10_000L
         private const val POLL_INTERVAL_MS = 1_000L
 
-        private const val LIVENESS_EXPR = "(window.__dmLiveness?window.__dmLiveness():0)"
-
         /**
-         * Injected after each page load. Maintains [window.__dmLiveness], a number that strictly
-         * increases while any `<video>` is actually decoding frames:
-         *  - primary: an event-driven `requestVideoFrameCallback` loop per `<video>`, so the count
-         *    reflects real frame delivery (not a timer that throttling could stop);
-         *  - fallback: the max `video.currentTime` (ms) for engines without `requestVideoFrameCallback`.
-         * A `MutationObserver` hooks `<video>` elements added later (go2rtc creates the element
-         * after WebRTC negotiation completes).
+         * Reports the furthest-progressed playback position (ms) across all non-paused `<video>`
+         * elements, or 0 when none is progressing. A live decode advances this every poll; a
+         * stalled or never-started stream (muted track, no frames) leaves it frozen.
          */
-        const val WATCH_JS = """
-            (function() {
-              if (window.__dmWatchInstalled) return;
-              window.__dmWatchInstalled = true;
-              window.__dmFrames = 0;
-              function hook(v) {
-                if (!v || v.__dmHooked) return;
-                v.__dmHooked = true;
-                if (typeof v.requestVideoFrameCallback === 'function') {
-                  var cb = function() {
-                    window.__dmFrames++;
-                    try { v.requestVideoFrameCallback(cb); } catch (e) {}
-                  };
-                  try { v.requestVideoFrameCallback(cb); } catch (e) {}
-                }
-              }
-              function scan() {
-                var vids = document.querySelectorAll('video');
-                for (var i = 0; i < vids.length; i++) hook(vids[i]);
-              }
-              window.__dmLiveness = function() {
-                if (window.__dmFrames > 0) return window.__dmFrames;
-                var vids = document.querySelectorAll('video');
-                var t = 0;
-                for (var i = 0; i < vids.length; i++) {
-                  if (!vids[i].paused && vids[i].currentTime > t) t = vids[i].currentTime;
-                }
-                return Math.floor(t * 1000);
-              };
-              scan();
-              try {
-                new MutationObserver(scan).observe(
-                  document.documentElement, { childList: true, subtree: true });
-              } catch (e) {}
-            })();
-        """
-
-        /** Run [WATCH_JS] in [webView] (call from WebViewClient.onPageFinished). */
-        fun injectInto(webView: WebView) {
-            webView.evaluateJavascript(WATCH_JS, null)
-        }
+        private const val PROGRESS_EXPR =
+            "(function(){var vs=document.querySelectorAll('video'),t=0;" +
+                "for(var i=0;i<vs.length;i++){if(!vs[i].paused&&vs[i].currentTime>t)" +
+                "t=vs[i].currentTime;}return Math.round(t*1000);})()"
     }
 }

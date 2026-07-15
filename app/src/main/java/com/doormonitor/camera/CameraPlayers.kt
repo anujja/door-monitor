@@ -150,14 +150,12 @@ fun buildWebRtcWebView(
             ViewGroup.LayoutParams.MATCH_PARENT
         )
 
-        val watchdog = StreamLivenessWatchdog(this)
+        // A dedicated camera page always expects a live stream, so recover even a feed that
+        // connects but never delivers a first frame.
+        val watchdog = StreamLivenessWatchdog(this, mode = StreamLivenessWatchdog.Mode.ALWAYS_EXPECT_VIDEO)
         setTag(R.id.tag_stream_watchdog, watchdog)
 
         webViewClient = object : WebViewClient() {
-            override fun onPageFinished(view: WebView, finishedUrl: String?) {
-                StreamLivenessWatchdog.injectInto(view)
-            }
-
             override fun onRenderProcessGone(
                 view: WebView,
                 detail: RenderProcessGoneDetail?

@@ -103,10 +103,12 @@ object DashboardWebViewFactory {
         }
 
         // Recover an embedded camera card (e.g. go2rtc WebRTC) that freezes on a frame. The
-        // timeout is long and a full page reload is heavy, so the watchdog only acts once a video
-        // has actually been progressing and then stalls (see StreamLivenessWatchdog.seenLive).
+        // timeout is long and a full page reload is heavy, and a dashboard may legitimately have
+        // no camera card, so this only acts once a video has actually been progressing and then
+        // stalls (ONLY_IF_WAS_LIVE).
         val watchdog = StreamLivenessWatchdog(
             webView,
+            mode = StreamLivenessWatchdog.Mode.ONLY_IF_WAS_LIVE,
             stallTimeoutMs = DASHBOARD_STALL_TIMEOUT_MS,
             tag = "DashboardStreamWatchdog"
         )
@@ -206,7 +208,6 @@ object DashboardWebViewFactory {
                 CookieManager.getInstance().flush()
                 // Inject CSS to suppress text selection and overscroll glow (pull-refresh).
                 view.evaluateJavascript(KIOSK_CSS_INJECTION, null)
-                StreamLivenessWatchdog.injectInto(view)
             }
 
             override fun onReceivedError(

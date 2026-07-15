@@ -16,8 +16,8 @@ import com.doormonitor.core.WebViewHealth
  * This is the gap that let the kiosk die silently. The existing recovery paths cannot see it:
  *  - [android.webkit.WebViewClient.onRenderProcessGone] only fires when the renderer actually
  *    *dies*. A renderer stuck in a loop never dies, so it never fires.
- *  - [com.doormonitor.camera.StreamLivenessWatchdog] deliberately does nothing until it has seen
- *    a video decoding frames (`seenLive`), so a dashboard with no camera card is unprotected.
+ *  - [com.doormonitor.camera.StreamLivenessWatchdog] only watches video liveness, so a dashboard
+ *    whose renderer is wedged but whose (cameraless) page has no video to judge is unprotected.
  *  - No ANR is raised either: the renderer is a *separate sandboxed process*, so its main thread
  *    hanging never trips the app process's input-dispatch watchdog. The app looks perfectly
  *    healthy from the outside while the screen is frozen — which is exactly what we observed.
