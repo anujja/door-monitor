@@ -7,6 +7,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.os.PowerManager
 import android.provider.Settings
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
@@ -31,6 +32,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.doormonitor.camera.CameraActivity
 import com.doormonitor.camera.PrewarmCameraOverlay
+import com.doormonitor.core.DiskLog
 import com.doormonitor.core.KioskBus
 import com.doormonitor.core.KioskCommand
 import com.doormonitor.data.CameraType
@@ -40,6 +42,7 @@ import com.doormonitor.ui.DashboardScreen
 import com.doormonitor.ui.MainViewModel
 import com.doormonitor.ui.SettingsScreen
 import com.doormonitor.ui.theme.DoorMonitorTheme
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /**
@@ -144,6 +147,22 @@ class MainActivity : ComponentActivity() {
                             onClose = { cameraOverlayId.value = null }
                         )
                     }
+
+                    // The overlay is opened by a doorbell / MQTT / HTTP command but is otherwise
+                    // only ever closed by hand (back, or the close button), so an unattended wall
+                    // tablet would sit on a live feed forever. That is how the kiosk once spent a
+                    // whole night with a dead stream on screen, its liveness watchdog reloading
+                    // every 10s. Retire it on a timer instead.
+                    LaunchedEffect(cameraOverlayId.value) {
+                        if (cameraOverlayId.value == null) return@LaunchedEffect
+                        delay(CAMERA_OVERLAY_TIMEOUT_MS)
+                        DiskLog.i(
+                            TAG,
+                            "camera overlay auto-dismissed after " +
+                                "${CAMERA_OVERLAY_TIMEOUT_MS / 1000}s"
+                        )
+                        cameraOverlayId.value = null
+                    }
                 }
 
                 // Route a pending camera-show request (from Intent / MQTT / HTTP): the pre-warm
@@ -244,6 +263,9 @@ class MainActivity : ComponentActivity() {
         )
     }
 
+    // BatteryLife: the Play Store restricts this prompt, but this is a sideloaded, mains-powered
+    // wall kiosk whose entire job is to stay reachable 24/7.
+    @android.annotation.SuppressLint("BatteryLife")
     private fun requestRuntimePermissions() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
@@ -272,11 +294,37 @@ class MainActivity : ComponentActivity() {
                 )
             }
         }
+        // Battery-optimisation exemption. Without it the platform cuts this app's network once it
+        // leaves the foreground: an observed outage left the kiosk with no network for 11 hours
+        // overnight, MQTT failing with ENETUNREACH, and it recovered within seconds of the screen
+        // coming back on. A foreground service is not sufficient on its own here — this tablet's
+        // OEM power manager restricts background apps more aggressively than stock Android.
+        //
+        // Re-checked on every launch rather than assumed granted. The grant is persisted, so it
+        // survives reboots and force-stops, but it can still go away — revoked by hand in
+        // Settings, wiped by a factory reset, or cleared by the OEM's own battery tooling — and
+        // this kiosk runs unattended for months at a time. Re-asking costs nothing once granted.
+        val power = getSystemService(Context.POWER_SERVICE) as PowerManager
+        if (!power.isIgnoringBatteryOptimizations(packageName)) {
+            DiskLog.w(TAG, "not exempt from battery optimisation; prompting for exemption")
+            runCatching {
+                startActivity(
+                    Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
+                        .setData(android.net.Uri.parse("package:$packageName"))
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                )
+            }
+        }
     }
 
     companion object {
+        private const val TAG = "MainActivity"
+
         /** Intent extra carrying a camera id to display (used for background launches). */
         const val EXTRA_SHOW_CAMERA = "show_camera_id"
+
+        /** How long the camera overlay stays up before dismissing itself. */
+        private const val CAMERA_OVERLAY_TIMEOUT_MS = 5 * 60 * 1000L
     }
 }
 

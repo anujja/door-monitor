@@ -1,7 +1,9 @@
 package com.doormonitor.camera
 
+import android.content.Context
 import android.os.Handler
 import android.os.Looper
+import android.os.PowerManager
 import android.os.SystemClock
 import android.webkit.WebView
 import com.doormonitor.core.DiskLog
@@ -26,6 +28,20 @@ import com.doormonitor.core.DiskLog
  * The ticker runs on the main thread on purpose: Android/Chromium throttles JS timers in
  * offscreen / low-visibility WebViews (the pre-warm-hidden case), so a pure-JS watchdog could
  * freeze along with the stream.
+ *
+ * Two guards keep a *permanent* failure from turning into a reload storm. Both exist because of
+ * an observed incident: the kiosk lost network for 11 hours overnight with the camera overlay
+ * left open, and this watchdog reloaded the page 4040 times — roughly one every 10s, all night —
+ * until the churn wedged the Chromium renderer and froze the UI.
+ *  - **Screen gate**: stalls are only judged while the display is interactive, matching
+ *    [com.doormonitor.web.WebViewHealthWatchdog]. Nobody is watching a feed on a dark screen, and
+ *    a backgrounded renderer is legitimately throttled, so reloading then is pure cost. Coming
+ *    back on-screen restarts the grace window rather than judging against pre-sleep timestamps.
+ *  - **Backoff**: each reload that fails to restore the video doubles the cooldown, up to
+ *    [MAX_RELOAD_COOLDOWN_MS]. A reload cannot fix an unreachable network, so retrying at a fixed
+ *    10s forever just burns CPU and decoder resources; the first few retries stay fast for the
+ *    common case (a genuinely stalled feed that one reload fixes). Any actual frame progress
+ *    resets the backoff.
  */
 class StreamLivenessWatchdog(
     private val webView: WebView,
@@ -51,11 +67,19 @@ class StreamLivenessWatchdog(
     }
 
     private val handler = Handler(Looper.getMainLooper())
+    private val power =
+        webView.context.applicationContext.getSystemService(Context.POWER_SERVICE) as PowerManager
 
     // Whether stalls should currently trigger a reload. Gated by visibility for the pre-warm
     // overlay so throttled frame delivery while hidden can't cause false reloads.
     private var enforcing = false
     private var running = false
+
+    // Tracks display state so the grace window can be restarted when the screen comes back on.
+    private var wasInteractive = true
+
+    // Consecutive reloads that have not restored frame progress; drives the cooldown backoff.
+    private var failedReloads = 0
 
     // Last `currentTime` (ms) seen, and when it last advanced. `lastProgress < 0` means we have
     // no baseline yet (just started/reset), so the next poll only records, it does not judge.
@@ -69,7 +93,14 @@ class StreamLivenessWatchdog(
     private val tick = object : Runnable {
         override fun run() {
             if (!running) return
-            if (enforcing) poll()
+            val interactive = runCatching { power.isInteractive }.getOrDefault(true)
+            if (interactive != wasInteractive) {
+                wasInteractive = interactive
+                // Coming back on-screen: judge the feed against a fresh window rather than
+                // timestamps from before the display slept, which would look like a long stall.
+                if (interactive) resetWindow()
+            }
+            if (enforcing && interactive) poll()
             handler.postDelayed(this, POLL_INTERVAL_MS)
         }
     }
@@ -77,6 +108,7 @@ class StreamLivenessWatchdog(
     fun start() {
         if (running) return
         running = true
+        wasInteractive = runCatching { power.isInteractive }.getOrDefault(true)
         resetWindow()
         handler.postDelayed(tick, POLL_INTERVAL_MS)
     }
@@ -94,7 +126,12 @@ class StreamLivenessWatchdog(
     fun setEnforcing(value: Boolean) {
         if (value == enforcing) return
         enforcing = value
-        if (value) resetWindow()
+        // A feed coming (back) on-screen is worth one prompt retry, so clear any accumulated
+        // backoff from the period when nobody was looking at it.
+        if (value) {
+            failedReloads = 0
+            resetWindow()
+        }
     }
 
     private fun resetWindow() {
@@ -129,6 +166,12 @@ class StreamLivenessWatchdog(
                     lastProgress = progress
                     lastLiveAt = now
                     seenLive = true
+                    // Frames are flowing again: the last reload worked (or none was needed), so
+                    // the next stall gets a fast first retry.
+                    if (failedReloads > 0) {
+                        DiskLog.i(tag, "stream recovered after $failedReloads reload(s)")
+                        failedReloads = 0
+                    }
                     return@evaluateJavascript
                 }
 
@@ -136,8 +179,14 @@ class StreamLivenessWatchdog(
                 // (avoids reloading a cameraless dashboard forever).
                 if (mode == Mode.ONLY_IF_WAS_LIVE && !seenLive) return@evaluateJavascript
 
-                if (now - lastLiveAt > stallTimeoutMs && now - lastReloadAt > reloadCooldownMs) {
-                    DiskLog.w(tag, "stream stalled ${now - lastLiveAt}ms; reloading to reconnect")
+                val cooldown = currentCooldownMs()
+                if (now - lastLiveAt > stallTimeoutMs && now - lastReloadAt > cooldown) {
+                    failedReloads++
+                    DiskLog.w(
+                        tag,
+                        "stream stalled ${now - lastLiveAt}ms; reloading to reconnect " +
+                            "(attempt $failedReloads, next retry in ${currentCooldownMs() / 1000}s)"
+                    )
                     lastReloadAt = now
                     resetWindow()
                     seenLive = false
@@ -147,10 +196,25 @@ class StreamLivenessWatchdog(
         }
     }
 
+    /**
+     * Cooldown before the next reload: [reloadCooldownMs] doubled once per consecutive reload that
+     * did not bring frames back, capped at [MAX_RELOAD_COOLDOWN_MS]. With the defaults that is
+     * 10s, 20s, 40s … 5min — so a feed one reload can fix still recovers in seconds, while an
+     * unreachable camera settles into a cheap 5-minute retry instead of hammering forever.
+     */
+    private fun currentCooldownMs(): Long {
+        val doublings = failedReloads.coerceIn(0, MAX_BACKOFF_DOUBLINGS)
+        return (reloadCooldownMs shl doublings).coerceAtMost(MAX_RELOAD_COOLDOWN_MS)
+    }
+
     companion object {
         const val STALL_TIMEOUT_MS = 6_000L
         const val RELOAD_COOLDOWN_MS = 10_000L
+        const val MAX_RELOAD_COOLDOWN_MS = 5 * 60 * 1_000L
         private const val POLL_INTERVAL_MS = 1_000L
+
+        // Bounds the shift itself so the doubling can never overflow a Long.
+        private const val MAX_BACKOFF_DOUBLINGS = 16
 
         /**
          * Reports the furthest-progressed playback position (ms) across all non-paused `<video>`

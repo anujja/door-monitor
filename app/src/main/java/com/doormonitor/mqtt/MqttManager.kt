@@ -5,6 +5,7 @@ import com.doormonitor.core.CommandHandler
 import com.doormonitor.core.DiskLog
 import com.doormonitor.data.AppSettings
 import com.hivemq.client.mqtt.MqttClient
+import com.hivemq.client.mqtt.MqttGlobalPublishFilter
 import com.hivemq.client.mqtt.datatypes.MqttQos
 import com.hivemq.client.mqtt.mqtt3.Mqtt3AsyncClient
 import com.hivemq.client.mqtt.mqtt3.message.publish.Mqtt3Publish
@@ -67,6 +68,17 @@ class MqttManager(
         val async = builder.buildAsync()
         client = async
 
+        // Deliver commands through ONE global consumer, registered once per client.
+        //
+        // The obvious alternative — `.callback {}` on the subscription itself — silently
+        // duplicates work: `automaticReconnectWithDefaultConfig` re-runs the connect listener on
+        // every reconnect, `cleanSession` forces a re-subscribe each time, and HiveMQ *keeps every
+        // per-subscription callback ever registered*. Each reconnect therefore added another
+        // handler for the same topic filter. A tablet up for 26 days had accumulated 15 of them
+        // and was running every single command 15 times (verified: one open socket, fifteen
+        // `MQTT command: screen = 'OFF'` log lines within 44ms).
+        async.publishes(MqttGlobalPublishFilter.SUBSCRIBED) { publish -> onCommand(publish) }
+
         val connectBuilder = async.connectWith()
             .cleanSession(true)
             .keepAlive(30)
@@ -99,11 +111,15 @@ class MqttManager(
         publishState()
     }
 
+    /**
+     * (Re-)establishes the broker-side subscription. Must run on every connect because the session
+     * is clean, but deliberately registers no callback — [connect] wires up a single global
+     * consumer instead, so reconnects cannot stack up duplicate handlers.
+     */
     private fun subscribeCommands(c: Mqtt3AsyncClient) {
         c.subscribeWith()
             .topicFilter("$base/command/#")
             .qos(MqttQos.AT_LEAST_ONCE)
-            .callback { publish -> onCommand(publish) }
             .send()
             .whenComplete { _, t -> if (t != null) Log.e(TAG, "subscribe failed", t) }
     }
