@@ -219,7 +219,7 @@ fun SettingsScreen(
             item { SectionTitle("Cameras") }
             item {
                 TextSetting(
-                    "Pre-warm camera id (instant WebRTC, blank = off)",
+                    "Pre-warm camera id (WebRTC overlay, blank = off)",
                     settings.prewarmCameraId
                 ) { v -> onChange { it.copy(prewarmCameraId = v.trim()) } }
             }

@@ -43,10 +43,10 @@ data class AppSettings(
     val motionWakeSeconds: Int = 30,
 
     /**
-     * Id of a camera to keep "pre-warmed" for instant display. When set, the dashboard holds a
-     * persistent, already-connected WebView for this camera and shows it as an overlay (rather
-     * than launching a fresh CameraActivity), so `command/camera <id>` appears with no
-     * negotiation delay. Costs continuous decode while the dashboard is up. Blank = disabled.
+     * Id of a camera to keep "pre-warmed" for fast display. When set, the dashboard holds a
+     * persistent WebView for this camera and shows it as an overlay (rather than launching a
+     * fresh CameraActivity) on `command/camera <id>`. The stream connects only while the overlay
+     * is on screen (live in ~2s on a LAN) and costs nothing the rest of the time. Blank = disabled.
      */
     val prewarmCameraId: String = "",
 

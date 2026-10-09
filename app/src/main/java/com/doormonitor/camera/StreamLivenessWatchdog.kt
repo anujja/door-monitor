@@ -48,7 +48,15 @@ class StreamLivenessWatchdog(
     private val mode: Mode = Mode.ALWAYS_EXPECT_VIDEO,
     private val stallTimeoutMs: Long = STALL_TIMEOUT_MS,
     private val reloadCooldownMs: Long = RELOAD_COOLDOWN_MS,
-    private val tag: String = "StreamWatchdog"
+    private val tag: String = "StreamWatchdog",
+    /**
+     * How to reconnect a stalled stream. [WebView.reload] repeats the *committed* page, which is
+     * not always the stream: a host that swaps the page out while hidden (the pre-warm overlay
+     * parks on about:blank) and is still waiting for the stream page to load when the stall timer
+     * fires would have the reload discard that load and repeat the blank page instead. Such a
+     * host passes a reconnect that loads the stream URL explicitly.
+     */
+    private val reconnect: (WebView) -> Unit = WebView::reload
 ) {
     enum class Mode {
         /**
@@ -70,8 +78,8 @@ class StreamLivenessWatchdog(
     private val power =
         webView.context.applicationContext.getSystemService(Context.POWER_SERVICE) as PowerManager
 
-    // Whether stalls should currently trigger a reload. Gated by visibility for the pre-warm
-    // overlay so throttled frame delivery while hidden can't cause false reloads.
+    // Whether stalls should currently trigger a reload. The pre-warm overlay only enables this
+    // while its stream is connected; the rest of the time its page has no video to judge.
     private var enforcing = false
     private var running = false
 
@@ -89,6 +97,10 @@ class StreamLivenessWatchdog(
 
     // ONLY_IF_WAS_LIVE latch: have we ever seen this video actually progress?
     private var seenLive = false
+
+    // When enforcement last switched on (the host has just connected the stream), until the first
+    // frame progress after it is logged; 0 = nothing pending. Records time-to-live in DiskLog.
+    private var enforcedSince = 0L
 
     private val tick = object : Runnable {
         override fun run() {
@@ -119,9 +131,9 @@ class StreamLivenessWatchdog(
     }
 
     /**
-     * Enable/disable stall enforcement (e.g. follow the pre-warm overlay's visibility). Enabling
-     * resets the grace window so a feed that comes on-screen gets a fresh [stallTimeoutMs] before
-     * it can be judged stalled.
+     * Enable/disable stall enforcement (e.g. follow whether the pre-warm overlay is connected).
+     * Enabling resets the grace window so a feed that comes on-screen gets a fresh
+     * [stallTimeoutMs] before it can be judged stalled.
      */
     fun setEnforcing(value: Boolean) {
         if (value == enforcing) return
@@ -130,6 +142,7 @@ class StreamLivenessWatchdog(
         // backoff from the period when nobody was looking at it.
         if (value) {
             failedReloads = 0
+            enforcedSince = SystemClock.uptimeMillis()
             resetWindow()
         }
     }
@@ -166,6 +179,12 @@ class StreamLivenessWatchdog(
                     lastProgress = progress
                     lastLiveAt = now
                     seenLive = true
+                    // Resolution is the poll interval: this is when progress was seen, not the
+                    // exact first frame.
+                    if (enforcedSince > 0) {
+                        DiskLog.i(tag, "stream live ${now - enforcedSince}ms after it was enabled")
+                        enforcedSince = 0
+                    }
                     // Frames are flowing again: the last reload worked (or none was needed), so
                     // the next stall gets a fast first retry.
                     if (failedReloads > 0) {
@@ -190,7 +209,7 @@ class StreamLivenessWatchdog(
                     lastReloadAt = now
                     resetWindow()
                     seenLive = false
-                    webView.reload()
+                    reconnect(webView)
                 }
             }
         }

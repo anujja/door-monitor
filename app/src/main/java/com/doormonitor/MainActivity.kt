@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
@@ -104,8 +105,8 @@ class MainActivity : ComponentActivity() {
                     return@DoorMonitorTheme
                 }
 
-                // The camera to keep pre-warmed in the on-dashboard overlay. Only WEBRTC cameras
-                // use the overlay (their connection setup is slow, so warming pays off). RTSP/
+                // The camera shown in the on-dashboard overlay. Only WEBRTC cameras use it (an
+                // already-created WebView takes the browser start-up off a slow connect). RTSP/
                 // HLS/MJPEG cameras are shown via the full-screen CameraActivity (native libVLC),
                 // which renders reliably; they ignore the pre-warm setting.
                 val prewarmCamera = remember(s.cameras, s.prewarmCameraId) {
@@ -137,15 +138,19 @@ class MainActivity : ComponentActivity() {
                         }
                     }
 
-                    // Persistent, always-connected overlay for the pre-warm camera. Stays in the
-                    // composition (so the WebRTC connection stays warm) whenever a pre-warm camera
-                    // is configured; only its visibility changes — making display instant.
+                    // Persistent overlay for the pre-warm camera. Stays in the composition whenever
+                    // a pre-warm camera is configured, so its WebView already exists; the stream
+                    // itself only connects while the overlay is on screen.
+                    // Keyed on the camera so changing it in Settings builds a fresh WebView: the
+                    // existing one (and its watchdog's reconnect) is bound to the old URL.
                     if (prewarmCamera != null) {
-                        PrewarmCameraOverlay(
-                            camera = prewarmCamera,
-                            visible = cameraOverlayId.value == prewarmCamera.id,
-                            onClose = { cameraOverlayId.value = null }
-                        )
+                        key(prewarmCamera.id, prewarmCamera.url) {
+                            PrewarmCameraOverlay(
+                                camera = prewarmCamera,
+                                visible = cameraOverlayId.value == prewarmCamera.id,
+                                onClose = { cameraOverlayId.value = null }
+                            )
+                        }
                     }
 
                     // The overlay is opened by a doorbell / MQTT / HTTP command but is otherwise

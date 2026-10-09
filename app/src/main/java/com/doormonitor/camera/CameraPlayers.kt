@@ -1,9 +1,11 @@
 package com.doormonitor.camera
 
 import android.annotation.SuppressLint
+import android.graphics.Bitmap
 import android.net.Uri
 import android.view.ViewGroup
 import android.webkit.RenderProcessGoneDetail
+import android.webkit.WebChromeClient
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.compose.runtime.Composable
@@ -124,20 +126,23 @@ private fun WebRtcSurface(camera: CameraDef, modifier: Modifier) {
 }
 
 /**
- * Creates a WebView configured for a go2rtc/WebRTC camera page and starts loading it. Shared by
- * the full-screen [CameraActivity] surface and the persistent pre-warm overlay so both behave
- * identically. A [StreamLivenessWatchdog] is attached (retrievable via [streamWatchdog]) that
- * reloads the page when the WebRTC video stalls, and [onRenderGone] fires if the render process
- * dies so the host can recreate the view.
+ * Creates a WebView configured for a go2rtc/WebRTC camera page and (by default) starts loading it.
+ * Shared by the full-screen [CameraActivity] surface and the persistent pre-warm overlay so both
+ * behave identically. A [StreamLivenessWatchdog] is attached (retrievable via [streamWatchdog])
+ * that reloads the page when the WebRTC video stalls, and [onRenderGone] fires if the render
+ * process dies so the host can recreate the view.
  *
  * @param enforceLiveness whether stall detection is active immediately (true for the always-visible
- *        full-screen view; the pre-warm overlay passes false and toggles it with visibility).
+ *        full-screen view; the pre-warm overlay passes false and enables it when it connects).
+ * @param load whether to load [url] now. The pre-warm overlay passes false and loads the page
+ *        itself only while it is on screen.
  */
 @SuppressLint("SetJavaScriptEnabled")
 fun buildWebRtcWebView(
     context: android.content.Context,
     url: String,
     enforceLiveness: Boolean = true,
+    load: Boolean = true,
     onRenderGone: () -> Unit = {}
 ): WebView =
     WebView(context).apply {
@@ -151,8 +156,14 @@ fun buildWebRtcWebView(
         )
 
         // A dedicated camera page always expects a live stream, so recover even a feed that
-        // connects but never delivers a first frame.
-        val watchdog = StreamLivenessWatchdog(this, mode = StreamLivenessWatchdog.Mode.ALWAYS_EXPECT_VIDEO)
+        // connects but never delivers a first frame. Reconnect by loading [url] rather than
+        // reloading: the pre-warm overlay parks this WebView on about:blank while hidden, and a
+        // reload issued before the camera page has committed would reload the blank page.
+        val watchdog = StreamLivenessWatchdog(
+            this,
+            mode = StreamLivenessWatchdog.Mode.ALWAYS_EXPECT_VIDEO,
+            reconnect = { it.loadUrl(url) }
+        )
         setTag(R.id.tag_stream_watchdog, watchdog)
 
         webViewClient = object : WebViewClient() {
@@ -167,9 +178,17 @@ fun buildWebRtcWebView(
             }
         }
 
+        // Until the first frame arrives, WebView paints its default poster for a <video> without
+        // one: a large grey play-button placeholder. A transparent poster leaves the black
+        // background showing while the stream connects instead.
+        webChromeClient = object : WebChromeClient() {
+            override fun getDefaultVideoPoster(): Bitmap =
+                Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888)
+        }
+
         watchdog.start()
         watchdog.setEnforcing(enforceLiveness)
-        loadUrl(url)
+        if (load) loadUrl(url)
     }
 
 /** The [StreamLivenessWatchdog] attached by [buildWebRtcWebView], if any. */
