@@ -5,4 +5,5 @@
     <string name="alert_channel_name">Tablet Alerts</string>
     <string name="alert_channel_desc">Battery and connectivity warnings.</string>
     <string name="notif_running">Door Monitor is running</string>
+    <string name="mygate_listener_label">Door Monitor: MyGate to MQTT</string>
 </resources>

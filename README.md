@@ -55,6 +55,15 @@ All responses are JSON. Optional password (`?password=…` or `Authorization: Be
   Battery-High binary_sensor appear automatically).
 - **HA webhooks** (inbound, via `/event`) and **HA REST/events** (outbound).
 
+### MyGate visitor alerts → MQTT (optional)
+- With MyGate signed in on the tablet and **Notification access** granted, every MyGate
+  notification (visitor at the gate, delivery, emergency…) is published to
+  `<deviceId>/mygate/notification` as JSON, and to `…/notification_removed` when it is answered
+  or times out. Also exposed as an HA `event` entity.
+- The tablet subscribes to that topic too. It rings a chime, wakes the screen and shows the
+  notification as a card for 15 s, then sleeps again. See
+  [MQTT topics](homeassistant/mqtt-topics.md#mygate-notifications).
+
 ### Motion-based wake (optional)
 - Wake on **camera motion** (MQTT), **doorbell press**, or **HA webhook**.
 

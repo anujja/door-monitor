@@ -24,6 +24,9 @@ import com.doormonitor.data.SettingsRepository
 import com.doormonitor.ha.HomeAssistantClient
 import com.doormonitor.http.LocalHttpServer
 import com.doormonitor.mqtt.MqttManager
+import com.doormonitor.mygate.MyGateAlerter
+import com.doormonitor.mygate.MyGateBus
+import com.doormonitor.mygate.MyGateEvent
 import com.doormonitor.screen.ScreenController
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
@@ -70,9 +73,13 @@ class KioskForegroundService : LifecycleService() {
         ).also { it.start() }
 
         handler = CommandHandler(applicationContext, screen, battery)
-        mqtt = MqttManager(handler)
+        val myGateAlerter = MyGateAlerter(applicationContext, lifecycleScope) { seconds ->
+            handler.wakeFor(seconds)
+        }
+        mqtt = MqttManager(handler, onMyGateNotification = myGateAlerter::onNotification)
 
         observeSettings()
+        relayMyGate()
         startHeartbeat()
         KioskWatchdog.schedule(applicationContext)
     }
@@ -155,6 +162,18 @@ class KioskForegroundService : LifecycleService() {
                 battery.warnAfterMillis = s.batteryWarnAfterHours * 60L * 60L * 1000L
                 applyHttp(s)
                 applyMqtt(s)
+            }
+        }
+    }
+
+    /** Forward MyGate notifications seen by MyGateNotificationListener out over MQTT. */
+    private fun relayMyGate() {
+        lifecycleScope.launch {
+            MyGateBus.events.collect { event ->
+                when (event) {
+                    is MyGateEvent.Posted -> mqtt.publishMyGateNotification(event.payload)
+                    is MyGateEvent.Removed -> mqtt.publishMyGateNotificationRemoved(event.payload)
+                }
             }
         }
     }

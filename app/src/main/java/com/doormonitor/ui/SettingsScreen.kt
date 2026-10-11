@@ -4,6 +4,7 @@ import android.app.admin.DevicePolicyManager
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
@@ -54,6 +55,7 @@ import com.doormonitor.data.AppSettings
 import com.doormonitor.data.CameraDef
 import com.doormonitor.data.CameraType
 import com.doormonitor.kiosk.DeviceAdminReceiver
+import com.doormonitor.mygate.MyGateNotificationListener
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -161,6 +163,7 @@ fun SettingsScreen(
                     onChange { it.copy(deviceId = v) }
                 }
             }
+            item { MyGateRelaySetting(settings.deviceId) }
 
             item { SectionTitle("Screen") }
             item {
@@ -386,6 +389,86 @@ private fun DeviceAdminSetting() {
                         active = dpm.isAdminActive(admin)
                     }) { Text("Disable") }
                 }
+            }
+        }
+    }
+}
+
+/**
+ * Status + shortcut for the Notification-access grant that lets [MyGateNotificationListener]
+ * see MyGate's visitor alerts and relay them to MQTT. Re-checked on resume, since the grant is
+ * made on a system screen.
+ */
+@Composable
+private fun MyGateRelaySetting(deviceId: String) {
+    val context = LocalContext.current
+    val listener = remember { ComponentName(context, MyGateNotificationListener::class.java) }
+    fun accessGranted() =
+        androidx.core.app.NotificationManagerCompat.getEnabledListenerPackages(context)
+            .contains(context.packageName)
+    val myGateInstalled = remember {
+        runCatching {
+            context.packageManager.getPackageInfo(MyGateNotificationListener.MYGATE_PACKAGE, 0)
+        }.isSuccess
+    }
+
+    var granted by remember { mutableStateOf(accessGranted()) }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) granted = accessGranted()
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    val base = deviceId.ifBlank { "doormonitor" }
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (granted) {
+                    Icon(
+                        Icons.Filled.CheckCircle,
+                        contentDescription = null,
+                        tint = Color(0xFF4CAF50)
+                    )
+                }
+                Text(
+                    text = if (granted) "MyGate alerts relayed to MQTT"
+                    else "MyGate relay needs notification access",
+                    style = MaterialTheme.typography.titleSmall,
+                    modifier = Modifier.padding(start = if (granted) 8.dp else 0.dp)
+                )
+            }
+            Text(
+                text = buildString {
+                    append("Each MyGate notification on this tablet is published to ")
+                    append("$base/mygate/notification, and $base/mygate/notification_removed ")
+                    append("when it goes away.")
+                    if (!myGateInstalled) append(" MyGate is not installed on this tablet.")
+                    if (!granted) {
+                        append(" If the toggle is greyed out, open App info → ⋮ → ")
+                        append("Allow restricted settings first.")
+                    }
+                },
+                style = MaterialTheme.typography.bodySmall
+            )
+            if (!granted) {
+                Button(onClick = {
+                    val detail = Intent(Settings.ACTION_NOTIFICATION_LISTENER_DETAIL_SETTINGS)
+                        .putExtra(
+                            Settings.EXTRA_NOTIFICATION_LISTENER_COMPONENT_NAME,
+                            listener.flattenToString()
+                        )
+                    runCatching { context.startActivity(detail) }.onFailure {
+                        context.startActivity(
+                            Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
+                        )
+                    }
+                }) { Text("Grant notification access") }
             }
         }
     }

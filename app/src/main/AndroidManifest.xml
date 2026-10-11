@@ -91,6 +91,18 @@
                 android:value="Always-on Home Assistant wall-tablet kiosk: keeps the local MQTT and HTTP control APIs, instant screen wake, and battery monitoring running 24/7." />
         </service>
 
+        <!-- Reads the MyGate app's notifications and relays them over MQTT. Inert until the
+             user grants Notification access. -->
+        <service
+            android:name=".mygate.MyGateNotificationListener"
+            android:exported="true"
+            android:label="@string/mygate_listener_label"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
+
         <!-- Auto-start after boot. -->
         <receiver
             android:name=".boot.BootReceiver"

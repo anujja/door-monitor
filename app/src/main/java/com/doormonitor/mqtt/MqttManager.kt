@@ -4,6 +4,7 @@ import android.util.Log
 import com.doormonitor.core.CommandHandler
 import com.doormonitor.core.DiskLog
 import com.doormonitor.data.AppSettings
+import com.doormonitor.mygate.MyGateNotificationListener
 import com.hivemq.client.mqtt.MqttClient
 import com.hivemq.client.mqtt.MqttGlobalPublishFilter
 import com.hivemq.client.mqtt.datatypes.MqttQos
@@ -27,12 +28,16 @@ import org.json.JSONObject
  *   <base>/command/camera               <cameraId>
  *   <base>/command/motion               any payload -> motion wake
  *   <base>/command/doorbell             any payload -> doorbell wake
+ *   <base>/mygate/notification          JSON, a MyGate notification was posted/updated (we
+ *                                       also subscribe to this, to show it on our own screen)
+ *   <base>/mygate/notification_removed  JSON, that notification went away (approved, timed out…)
  *
  * Also publishes Home Assistant MQTT Discovery configs so a switch/sensors appear
  * automatically (see publishDiscovery).
  */
 class MqttManager(
-    private val handler: CommandHandler
+    private val handler: CommandHandler,
+    private val onMyGateNotification: (JSONObject) -> Unit = {}
 ) {
     private var client: Mqtt3AsyncClient? = null
     private var base: String = "doormonitor"
@@ -77,7 +82,7 @@ class MqttManager(
         // handler for the same topic filter. A tablet up for 26 days had accumulated 15 of them
         // and was running every single command 15 times (verified: one open socket, fifteen
         // `MQTT command: screen = 'OFF'` log lines within 44ms).
-        async.publishes(MqttGlobalPublishFilter.SUBSCRIBED) { publish -> onCommand(publish) }
+        async.publishes(MqttGlobalPublishFilter.SUBSCRIBED) { publish -> onMessage(publish) }
 
         val connectBuilder = async.connectWith()
             .cleanSession(true)
@@ -106,27 +111,35 @@ class MqttManager(
         connected = true
         val c = client ?: return
         publish("$base/availability", "online", retain = true)
-        subscribeCommands(c)
+        subscribe(c)
         publishDiscovery(settings)
         publishState()
     }
 
     /**
-     * (Re-)establishes the broker-side subscription. Must run on every connect because the session
-     * is clean, but deliberately registers no callback — [connect] wires up a single global
-     * consumer instead, so reconnects cannot stack up duplicate handlers.
+     * (Re-)establishes the broker-side subscriptions. Must run on every connect because the
+     * session is clean, but deliberately registers no callback — [connect] wires up a single
+     * global consumer instead, so reconnects cannot stack up duplicate handlers.
      */
-    private fun subscribeCommands(c: Mqtt3AsyncClient) {
-        c.subscribeWith()
-            .topicFilter("$base/command/#")
-            .qos(MqttQos.AT_LEAST_ONCE)
-            .send()
-            .whenComplete { _, t -> if (t != null) Log.e(TAG, "subscribe failed", t) }
+    private fun subscribe(c: Mqtt3AsyncClient) {
+        for (filter in listOf("$base/command/#", "$base/mygate/notification")) {
+            c.subscribeWith()
+                .topicFilter(filter)
+                .qos(MqttQos.AT_LEAST_ONCE)
+                .send()
+                .whenComplete { _, t -> if (t != null) Log.e(TAG, "subscribe $filter failed", t) }
+        }
     }
 
-    private fun onCommand(publish: Mqtt3Publish) {
+    private fun onMessage(publish: Mqtt3Publish) {
         val topic = publish.topic.toString()
         val payload = publish.payloadAsBytes.toString(StandardCharsets.UTF_8).trim()
+        if (topic == "$base/mygate/notification") {
+            runCatching { JSONObject(payload) }
+                .onSuccess(onMyGateNotification)
+                .onFailure { DiskLog.w(TAG, "ignoring malformed MyGate payload: ${it.message}") }
+            return
+        }
         val cmd = topic.removePrefix("$base/command/")
         DiskLog.i(TAG, "MQTT command: $cmd = '$payload'")
         when (cmd) {
@@ -154,6 +167,15 @@ class MqttManager(
         publish("$base/battery_warning", if (active) "ON" else "OFF", retain = true)
     }
 
+    /** Not retained: a visitor alert replayed to a late subscriber would be stale. */
+    fun publishMyGateNotification(payload: JSONObject) {
+        publish("$base/mygate/notification", payload.toString())
+    }
+
+    fun publishMyGateNotificationRemoved(payload: JSONObject) {
+        publish("$base/mygate/notification_removed", payload.toString())
+    }
+
     private fun publish(topic: String, payload: String, retain: Boolean = false) {
         client?.publishWith()
             ?.topic(topic)
@@ -168,6 +190,7 @@ class MqttManager(
      *  - a switch for the screen
      *  - sensors for battery level / health / state
      *  - a binary_sensor for the high-battery warning
+     *  - an event entity that fires for each MyGate notification
      */
     private fun publishDiscovery(settings: AppSettings) {
         val nodeId = base
@@ -231,6 +254,20 @@ class MqttManager(
                 put("state_topic", "$base/battery_warning")
                 put("payload_on", "ON"); put("payload_off", "OFF")
                 put("device_class", "problem")
+                put("availability", org.json.JSONArray(listOf(availability)))
+                put("device", device)
+            }
+        )
+        // MyGate notifications. HA reads `event_type` from the payload and exposes the other
+        // fields (title, text, actions…) as attributes of the fired event.
+        publishDiscoveryConfig(
+            component = "event", objectId = "${nodeId}_mygate",
+            config = JSONObject().apply {
+                put("name", "MyGate")
+                put("unique_id", "${nodeId}_mygate")
+                put("state_topic", "$base/mygate/notification")
+                put("event_types", org.json.JSONArray(MyGateNotificationListener.EVENT_TYPES))
+                put("icon", "mdi:gate")
                 put("availability", org.json.JSONArray(listOf(availability)))
                 put("device", device)
             }

@@ -38,9 +38,11 @@ import com.doormonitor.core.KioskBus
 import com.doormonitor.core.KioskCommand
 import com.doormonitor.data.CameraType
 import com.doormonitor.kiosk.KioskController
+import com.doormonitor.mygate.MyGateAlerts
 import com.doormonitor.service.KioskForegroundService
 import com.doormonitor.ui.DashboardScreen
 import com.doormonitor.ui.MainViewModel
+import com.doormonitor.ui.MyGateAlertOverlay
 import com.doormonitor.ui.SettingsScreen
 import com.doormonitor.ui.theme.DoorMonitorTheme
 import kotlinx.coroutines.delay
@@ -168,6 +170,10 @@ class MainActivity : ComponentActivity() {
                         )
                         cameraOverlayId.value = null
                     }
+
+                    // MyGate visitor/delivery card; above the camera overlay so it is never hidden.
+                    val myGateAlert by MyGateAlerts.current.collectAsState()
+                    MyGateAlertOverlay(alert = myGateAlert, onDismiss = MyGateAlerts::dismiss)
                 }
 
                 // Route a pending camera-show request (from Intent / MQTT / HTTP): the pre-warm

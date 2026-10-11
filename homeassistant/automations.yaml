@@ -114,3 +114,23 @@
     - delay: "00:00:30"
     - service: rest_command.doormonitor_reload
   mode: single
+
+# 9) MyGate visitor at the gate → announce it on the phone too.
+#    Door Monitor relays MyGate's notifications to MQTT (needs Notification access) and
+#    already shows them on the tablet itself (chime + card + 15 s wake), so this only
+#    adds a phone notification. The payload carries title / text / actions from MyGate.
+- alias: "Tablet — MyGate visitor, also notify phone"
+  trigger:
+    - platform: mqtt
+      topic: "doormonitor/mygate/notification"
+  condition:
+    - condition: template
+      value_template: >-
+        {{ trigger.payload_json.event_type == 'approval'
+           and not trigger.payload_json.update }}
+  action:
+    - service: notify.mobile_app_phone
+      data:
+        title: "{{ trigger.payload_json.title }}"
+        message: "{{ trigger.payload_json.text }}"
+  mode: queued
