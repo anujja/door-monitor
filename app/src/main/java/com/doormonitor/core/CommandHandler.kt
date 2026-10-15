@@ -32,7 +32,18 @@ class CommandHandler(
         bringDashboardToFront()
     }
 
-    fun screenOff() = screen.screenOff()
+    /**
+     * Consulted before a screen-off asked for from outside (MQTT, HTTP). Returning true means
+     * something on screen still needs it and will switch it off itself once done: the MyGate
+     * card for a visitor waiting at the gate, which an automation must not black out.
+     */
+    @Volatile
+    var screenOffHold: (() -> Boolean)? = null
+
+    fun screenOff() {
+        if (screenOffHold?.invoke() == true) return
+        screen.screenOff()
+    }
 
     fun setBrightness(value0to255: Int) = screen.setBrightness(value0to255)
 
@@ -48,7 +59,7 @@ class CommandHandler(
         bringDashboardToFront()
     }
 
-    fun sleep() = screen.screenOff()
+    fun sleep() = screenOff()
 
     /**
      * Bring [MainActivity] to the foreground so it resumes and dismisses the (insecure) keyguard

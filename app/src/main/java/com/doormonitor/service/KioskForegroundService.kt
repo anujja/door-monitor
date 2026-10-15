@@ -73,10 +73,15 @@ class KioskForegroundService : LifecycleService() {
         ).also { it.start() }
 
         handler = CommandHandler(applicationContext, screen, battery)
-        val myGateAlerter = MyGateAlerter(applicationContext, lifecycleScope) { seconds ->
-            handler.wakeFor(seconds)
-        }
-        mqtt = MqttManager(handler, onMyGateNotification = myGateAlerter::onNotification)
+        val myGateAlerter = MyGateAlerter(
+            applicationContext,
+            lifecycleScope,
+            wakeFor = { seconds -> handler.wakeFor(seconds) },
+            screenOff = { screen.screenOff() },
+            publishResponse = { id, response -> mqtt.publishMyGateResponse(id, response) }
+        )
+        handler.screenOffHold = myGateAlerter::holdScreenOff
+        mqtt = MqttManager(handler, onMyGate = myGateAlerter::onMqtt)
 
         observeSettings()
         relayMyGate()

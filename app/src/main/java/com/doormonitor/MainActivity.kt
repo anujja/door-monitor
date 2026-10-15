@@ -173,7 +173,11 @@ class MainActivity : ComponentActivity() {
 
                     // MyGate visitor/delivery card; above the camera overlay so it is never hidden.
                     val myGateAlert by MyGateAlerts.current.collectAsState()
-                    MyGateAlertOverlay(alert = myGateAlert, onDismiss = MyGateAlerts::dismiss)
+                    MyGateAlertOverlay(
+                        alert = myGateAlert,
+                        onDismiss = MyGateAlerts::dismiss,
+                        onRespond = MyGateAlerts::respond
+                    )
                 }
 
                 // Route a pending camera-show request (from Intent / MQTT / HTTP): the pre-warm

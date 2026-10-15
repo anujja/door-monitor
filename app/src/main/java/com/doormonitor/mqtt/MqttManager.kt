@@ -28,16 +28,21 @@ import org.json.JSONObject
  *   <base>/command/camera               <cameraId>
  *   <base>/command/motion               any payload -> motion wake
  *   <base>/command/doorbell             any payload -> doorbell wake
- *   <base>/mygate/notification          JSON, a MyGate notification was posted/updated (we
- *                                       also subscribe to this, to show it on our own screen)
+ *   <base>/mygate/notification          JSON, a MyGate notification was posted/updated
  *   <base>/mygate/notification_removed  JSON, that notification went away (approved, timed out…)
+ *   <base>/mygate/respond               JSON {action, id}: an answer to a visitor (we publish)
+ *   <base>/mygate/response              JSON {id, action, ok, error}: how that answer went
+ *
+ * The tablet relays MyGate's notifications (when MyGate runs here) and also subscribes to the
+ * mygate topics itself, to show alerts on its own screen with Approve / Deny buttons.
  *
  * Also publishes Home Assistant MQTT Discovery configs so a switch/sensors appear
  * automatically (see publishDiscovery).
  */
 class MqttManager(
     private val handler: CommandHandler,
-    private val onMyGateNotification: (JSONObject) -> Unit = {}
+    /** A message on `<base>/mygate/<subtopic>` for one of [MYGATE_SUBTOPICS]. */
+    private val onMyGate: (subtopic: String, payload: JSONObject) -> Unit = { _, _ -> }
 ) {
     private var client: Mqtt3AsyncClient? = null
     private var base: String = "doormonitor"
@@ -122,7 +127,7 @@ class MqttManager(
      * global consumer instead, so reconnects cannot stack up duplicate handlers.
      */
     private fun subscribe(c: Mqtt3AsyncClient) {
-        for (filter in listOf("$base/command/#", "$base/mygate/notification")) {
+        for (filter in listOf("$base/command/#") + MYGATE_SUBTOPICS.map { "$base/mygate/$it" }) {
             c.subscribeWith()
                 .topicFilter(filter)
                 .qos(MqttQos.AT_LEAST_ONCE)
@@ -134,10 +139,11 @@ class MqttManager(
     private fun onMessage(publish: Mqtt3Publish) {
         val topic = publish.topic.toString()
         val payload = publish.payloadAsBytes.toString(StandardCharsets.UTF_8).trim()
-        if (topic == "$base/mygate/notification") {
+        if (topic.startsWith("$base/mygate/")) {
+            val subtopic = topic.removePrefix("$base/mygate/")
             runCatching { JSONObject(payload) }
-                .onSuccess(onMyGateNotification)
-                .onFailure { DiskLog.w(TAG, "ignoring malformed MyGate payload: ${it.message}") }
+                .onSuccess { onMyGate(subtopic, it) }
+                .onFailure { DiskLog.w(TAG, "ignoring malformed MyGate $subtopic: ${it.message}") }
             return
         }
         val cmd = topic.removePrefix("$base/command/")
@@ -174,6 +180,13 @@ class MqttManager(
 
     fun publishMyGateNotificationRemoved(payload: JSONObject) {
         publish("$base/mygate/notification_removed", payload.toString())
+    }
+
+    /** Answer a visitor: whatever handles `…/respond` (the HA MyGate integration) acts on it. */
+    fun publishMyGateResponse(id: String, response: String): Boolean {
+        if (!connected) return false
+        publish("$base/mygate/respond", JSONObject().put("action", response).put("id", id).toString())
+        return true
     }
 
     private fun publish(topic: String, payload: String, retain: Boolean = false) {
@@ -289,5 +302,8 @@ class MqttManager(
 
     companion object {
         private const val TAG = "MqttManager"
+
+        /** The `<base>/mygate/…` topics the tablet listens to for its own alert card. */
+        val MYGATE_SUBTOPICS = listOf("notification", "notification_removed", "response")
     }
 }

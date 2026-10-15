@@ -1,0 +1,76 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Sign in to MyGate",
+        "description": "Home Assistant signs in as its own device on your MyGate account and receives visitor alerts directly. MyGate will text you an OTP.",
+        "data": {
+          "phone": "Mobile number",
+          "country_code": "Country code",
+          "topic": "MQTT topic prefix"
+        },
+        "data_description": {
+          "phone": "The number you sign in to MyGate with, without the country code.",
+          "topic": "Alerts are published under this prefix, at /notification and /notification_removed. Answers are read from /respond."
+        }
+      },
+      "otp": {
+        "title": "Enter the OTP",
+        "description": "Enter the OTP MyGate sent to {phone}. Signing in also registers for MyGate's push alerts, which takes about 10 seconds.",
+        "data": {
+          "otp": "OTP"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Sign in to MyGate again",
+        "description": "MyGate signed this device out. Submit to have MyGate text a new OTP to {phone}."
+      }
+    },
+    "error": {
+      "otp_request_failed": "MyGate could not send an OTP to this number. Check the number and try again.",
+      "invalid_otp": "That OTP doesn't match. Check the latest message from MyGate.",
+      "login_failed": "MyGate refused the sign-in. See the Home Assistant log for details.",
+      "push_registration_failed": "Could not register for MyGate's push alerts. See the Home Assistant log for details."
+    },
+    "abort": {
+      "already_configured": "This MyGate account is already set up.",
+      "reauth_successful": "Signed in to MyGate again."
+    }
+  },
+  "entity": {
+    "binary_sensor": {
+      "push_connected": {
+        "name": "Alerts connected"
+      }
+    }
+  },
+  "selector": {
+    "action": {
+      "options": {
+        "approve": "Approve",
+        "deny": "Deny",
+        "leave_at_gate": "Leave at gate"
+      }
+    }
+  },
+  "services": {
+    "respond": {
+      "name": "Respond to visitor",
+      "description": "Approves or denies a visitor waiting at the gate, or asks the guard to keep a delivery at the gate.",
+      "fields": {
+        "action": {
+          "name": "Response",
+          "description": "Leave at gate is only offered for deliveries."
+        },
+        "id": {
+          "name": "Alert ID",
+          "description": "The `id` from the MQTT alert. Leave empty to answer the most recent visitor still waiting."
+        }
+      }
+    },
+    "send_test_alert": {
+      "name": "Send test alert",
+      "description": "Asks MyGate to push its visitor test alert to Home Assistant only. Answering it doesn't reach MyGate."
+    }
+  }
+}

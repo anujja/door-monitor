@@ -1,0 +1,18 @@
+respond:
+  fields:
+    action:
+      required: true
+      selector:
+        select:
+          options:
+            - approve
+            - deny
+            - leave_at_gate
+          translation_key: action
+    id:
+      required: false
+      example: "6703f1c2a9e4b1d0c8a7e512"
+      selector:
+        text:
+
+send_test_alert:

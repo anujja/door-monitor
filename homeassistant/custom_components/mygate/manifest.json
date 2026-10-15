@@ -1,0 +1,13 @@
+{
+  "domain": "mygate",
+  "name": "MyGate",
+  "codeowners": [],
+  "config_flow": true,
+  "dependencies": ["mqtt"],
+  "documentation": "https://github.com/anujja/door-monitor/tree/main/homeassistant/custom_components/mygate",
+  "integration_type": "service",
+  "iot_class": "cloud_push",
+  "loggers": ["firebase_messaging"],
+  "requirements": ["firebase-messaging>=0.4.5", "h2>=4.1.0"],
+  "version": "0.1.0"
+}

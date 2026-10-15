@@ -12,3 +12,5 @@ local.properties
 *.aab
 *.keystore
 !debug.keystore
+__pycache__/
+homeassistant/custom_components/mygate/identity.py

@@ -115,11 +115,12 @@
     - service: rest_command.doormonitor_reload
   mode: single
 
-# 9) MyGate visitor at the gate → announce it on the phone too.
-#    Door Monitor relays MyGate's notifications to MQTT (needs Notification access) and
-#    already shows them on the tablet itself (chime + card + 15 s wake), so this only
-#    adds a phone notification. The payload carries title / text / actions from MyGate.
-- alias: "Tablet — MyGate visitor, also notify phone"
+# 9) MyGate visitor at the gate → phone notification with Approve / Deny buttons.
+#    The MyGate integration (custom_components/mygate) publishes MyGate's alerts to MQTT, and
+#    the tablet already shows them itself (chime + card + 15 s wake). This adds the phone,
+#    where a button press answers the visitor through mygate.respond. The notification is
+#    cleared once the visitor is answered (here or elsewhere) or times out.
+- alias: "Tablet — MyGate visitor, ask on phone"
   trigger:
     - platform: mqtt
       topic: "doormonitor/mygate/notification"
@@ -133,4 +134,37 @@
       data:
         title: "{{ trigger.payload_json.title }}"
         message: "{{ trigger.payload_json.text }}"
+        data:
+          tag: "mygate-{{ trigger.payload_json.id }}"
+          actions:
+            - action: "MYGATE_APPROVE_{{ trigger.payload_json.id }}"
+              title: Approve
+            - action: "MYGATE_DENY_{{ trigger.payload_json.id }}"
+              title: Deny
+  mode: queued
+
+- alias: "Phone — answer MyGate visitor"
+  trigger:
+    - platform: event
+      event_type: mobile_app_notification_action
+  condition:
+    - condition: template
+      value_template: "{{ trigger.event.data.action.startswith('MYGATE_') }}"
+  action:
+    - service: mygate.respond
+      data:
+        action: "{{ trigger.event.data.action.split('_')[1] | lower }}"
+        id: "{{ trigger.event.data.action.split('_', 2)[2] }}"
+  mode: queued
+
+- alias: "Phone — clear answered MyGate visitor"
+  trigger:
+    - platform: mqtt
+      topic: "doormonitor/mygate/notification_removed"
+  action:
+    - service: notify.mobile_app_phone
+      data:
+        message: clear_notification
+        data:
+          tag: "mygate-{{ trigger.payload_json.id }}"
   mode: queued

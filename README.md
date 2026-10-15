@@ -56,12 +56,19 @@ All responses are JSON. Optional password (`?password=…` or `Authorization: Be
 - **HA webhooks** (inbound, via `/event`) and **HA REST/events** (outbound).
 
 ### MyGate visitor alerts → MQTT (optional)
-- With MyGate signed in on the tablet and **Notification access** granted, every MyGate
-  notification (visitor at the gate, delivery, emergency…) is published to
-  `<deviceId>/mygate/notification` as JSON, and to `…/notification_removed` when it is answered
-  or times out. Also exposed as an HA `event` entity.
+- MyGate alerts (visitor at the gate, delivery, emergency…) are published to
+  `<deviceId>/mygate/notification` as JSON, and to `…/notification_removed` when answered or
+  timed out. Also exposed as an HA `event` entity. They come from either:
+  - the **MyGate integration for Home Assistant**
+    ([`homeassistant/custom_components/mygate`](homeassistant/custom_components/mygate)). It
+    receives MyGate's alerts directly, so MyGate needn't be installed on the tablet, and it can
+    approve or deny visitors (`mygate.respond`, or MQTT `…/mygate/respond`); or
+  - the tablet itself, relaying MyGate's notifications when MyGate is signed in on it and
+    **Notification access** is granted.
 - The tablet subscribes to that topic too. It rings a chime, wakes the screen and shows the
-  notification as a card for 15 s, then sleeps again. See
+  alert as a card led by the visitor's photo, name and company (Swiggy, Amazon…). A visitor
+  waiting at the gate gets **Approve / Deny** buttons and stays on screen until answered; other
+  alerts show for 15 s. Then the screen sleeps again. See
   [MQTT topics](homeassistant/mqtt-topics.md#mygate-notifications).
 
 ### Motion-based wake (optional)
