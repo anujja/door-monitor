@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 from functools import partial
 import json
 import logging
+import re
 import time
 from typing import Any
 
@@ -28,13 +29,25 @@ from .const import (
     CONF_TOPIC,
     CONF_USER_ID,
     DEFAULT_TOPIC,
+    RESPONSE_APPROVE,
     RESPONSE_CODES,
+    RESPONSE_DENY,
     RESPONSE_LEAVE_AT_GATE,
+    SIGNAL_HISTORY,
     SIGNAL_PUSH_STATE,
     TYPE_APPROVAL,
     TYPE_EMERGENCY,
     TYPE_GENERAL,
     TYPE_VEHICLE,
+)
+from .history import (
+    OUTCOME_ANSWERED,
+    OUTCOME_APPROVED,
+    OUTCOME_DENIED,
+    OUTCOME_LEFT_AT_GATE,
+    OUTCOME_TIMEOUT,
+    OUTCOME_WAITING,
+    MyGateHistory,
 )
 from .push import MyGatePushListener, push_token
 
@@ -57,6 +70,18 @@ TOKEN_REFRESH_INTERVAL = timedelta(hours=1)
 
 # guest.usertypeid → what the app calls the visitor.
 VISITOR_TYPES = {"1213": "guest", "1008": "delivery", "1022": "cab"}
+
+# Check-in notices (click_action "mygate_feed") carry no guest details, only MyGate's sentence:
+# "Ramesh from Blinkit has checked in to your society through the Main Gate".
+VISITOR_FROM = re.compile(
+    r"(?P<name>.+?) from (?P<company>.+?) (?:has checked (?:in|out)|requires your approval)\b"
+)
+
+RESPONSE_OUTCOMES = {
+    RESPONSE_APPROVE: OUTCOME_APPROVED,
+    RESPONSE_DENY: OUTCOME_DENIED,
+    RESPONSE_LEAVE_AT_GATE: OUTCOME_LEFT_AT_GATE,
+}
 
 
 @dataclass
@@ -94,6 +119,18 @@ def _text(data: dict[str, Any], *keys: str) -> str | None:
     return None
 
 
+def _status_outcome(text: str | None) -> str:
+    """How someone else answered, from MyGate's status text ("Entry approved by …")."""
+    words = (text or "").lower()
+    if "approved" in words or "allowed" in words:
+        return OUTCOME_APPROVED
+    if "denied" in words or "rejected" in words or "declined" in words:
+        return OUTCOME_DENIED
+    if "leave" in words or "left at" in words:
+        return OUTCOME_LEFT_AT_GATE
+    return OUTCOME_ANSWERED
+
+
 def _classify(data: dict[str, Any]) -> str:
     action = str(data.get("click_action") or "")
     if action in APPROVAL_ACTIONS:
@@ -123,6 +160,7 @@ class MyGateHub:
         self.topic = entry.data.get(CONF_TOPIC, DEFAULT_TOPIC).rstrip("/")
         self.pending: dict[str, PendingAlert] = {}
         self.last_alert: datetime | None = None
+        self.history = MyGateHistory(hass, entry.entry_id, self._history_changed)
         self._listener = MyGatePushListener(
             async_get_clientsession(hass),
             entry.data[CONF_FCM_CREDENTIALS],
@@ -153,6 +191,7 @@ class MyGateHub:
     # ── lifecycle ────────────────────────────────────────────────────────────────────────────
 
     async def async_start(self) -> None:
+        await self.history.async_load()
         await self._refresh_token_registration()
         try:
             await self._listener.start()
@@ -195,6 +234,10 @@ class MyGateHub:
         if self.connected != self._was_connected:
             self._was_connected = self.connected
             async_dispatcher_send(self.hass, f"{SIGNAL_PUSH_STATE}_{self.entry.entry_id}")
+
+    @callback
+    def _history_changed(self) -> None:
+        async_dispatcher_send(self.hass, f"{SIGNAL_HISTORY}_{self.entry.entry_id}")
 
     @callback
     def _on_signed_out(self) -> None:
@@ -278,6 +321,7 @@ class MyGateHub:
         payload["update"] = existing is not None
         self.last_alert = dt_util.utcnow()
         await self._publish(f"{self.topic}/notification", payload)
+        self.history.record(payload, OUTCOME_WAITING if responses else None)
 
         if event_type == TYPE_APPROVAL and responses:
             if existing and existing.expire:
@@ -298,10 +342,14 @@ class MyGateHub:
         payload = self._payload(data, TYPE_GENERAL, alert_id or f"status-{created}", created, 0, [], False)
         payload["update"] = True  # an outcome, not a new visitor: no chime on the tablet
         await self._publish(f"{self.topic}/notification", payload)
+        self.history.resolve(
+            payload["id"], _status_outcome(payload["text"]), payload["text"], payload=payload
+        )
 
     @callback
     def _expire(self, alert_id: str, _now: datetime | None = None) -> None:
         if alert := self.pending.pop(alert_id, None):
+            self.history.resolve(alert_id, OUTCOME_TIMEOUT, unless_answered=True)
             self.hass.async_create_task(self._publish_removed(alert, "timeout"), "mygate expire")
 
     def _responses_for(self, data: dict[str, Any]) -> list[str]:
@@ -340,6 +388,12 @@ class MyGateHub:
             "type": VISITOR_TYPES.get(str(guest.get("usertypeid")), guest.get("usertypeid")),
             "nature": _text(guest, "nature"),
         }
+        if not (visitor["name"] and visitor["company"]) and (
+            match := VISITOR_FROM.match(_text(data, "body", "subtitle") or "")
+        ):
+            if not match["name"].lower().startswith("your "):
+                visitor["name"] = visitor["name"] or match["name"]
+                visitor["company"] = visitor["company"] or match["company"]
         actions = [a for a in (_text(data, "action1"), _text(data, "action2")) if a]
         if RESPONSE_LEAVE_AT_GATE in responses:
             actions.append("Leave at gate")
@@ -434,6 +488,7 @@ class MyGateHub:
         self.pending.pop(alert_id, None)
         if alert.expire:
             alert.expire()
+        self.history.resolve(alert_id, RESPONSE_OUTCOMES[response], "Answered from Home Assistant")
         await self._publish_removed(alert, "responded", response)
 
     @callback

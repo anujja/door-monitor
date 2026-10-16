@@ -2,15 +2,19 @@
 
 Signs in to the resident's MyGate account as its own device, receives MyGate's push alerts
 directly, publishes each one on MQTT (`<topic>/notification`, `<topic>/notification_removed`),
-and answers gate approvals through the `mygate.respond` action or `<topic>/respond`.
+and answers gate approvals through the `mygate.respond` action or `<topic>/respond`. Keeps a
+history of the alerts, which the bundled `custom:mygate-history-card` shows on a dashboard.
 """
 
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 
 import voluptuous as vol
 
+from homeassistant.components.frontend import add_extra_js_url
+from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, ServiceCall
@@ -30,14 +34,18 @@ from .const import (
     SERVICE_RESPOND,
     SERVICE_SEND_TEST_ALERT,
 )
+from .history import MyGateHistory
 from .hub import MyGateHub
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS = [Platform.BINARY_SENSOR]
+PLATFORMS = [Platform.BINARY_SENSOR, Platform.SENSOR]
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
 type MyGateConfigEntry = ConfigEntry[MyGateHub]
+
+CARD_FILE = Path(__file__).parent / "frontend" / "mygate-history-card.js"
+CARD_URL = f"/{DOMAIN}/{CARD_FILE.name}"
 
 RESPOND_SCHEMA = vol.Schema(
     {
@@ -63,6 +71,13 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
 
     hass.services.async_register(DOMAIN, SERVICE_RESPOND, respond, schema=RESPOND_SCHEMA)
     hass.services.async_register(DOMAIN, SERVICE_SEND_TEST_ALERT, send_test_alert)
+
+    # The history card, loaded on every dashboard. Its modification time busts browser caches.
+    await hass.http.async_register_static_paths(
+        [StaticPathConfig(CARD_URL, str(CARD_FILE), cache_headers=False)]
+    )
+    mtime = await hass.async_add_executor_job(lambda: int(CARD_FILE.stat().st_mtime))
+    add_extra_js_url(hass, f"{CARD_URL}?v={mtime}")
     return True
 
 
@@ -82,7 +97,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: MyGateConfigEntry) -> b
 
 
 async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Sign this device out of MyGate so it stops receiving pushes."""
+    """Sign this device out of MyGate so it stops receiving pushes, and drop its history."""
+    await MyGateHistory(hass, entry.entry_id, lambda: None).async_remove()
     api = MyGateApi(
         async_get_client(hass), entry.data[CONF_DEVICE_ID], entry.data[CONF_API_KEY]
     )

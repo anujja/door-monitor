@@ -35,3 +35,4 @@ ATTR_ACTION = "action"
 ATTR_ID = "id"
 
 SIGNAL_PUSH_STATE = f"{DOMAIN}_push_state"
+SIGNAL_HISTORY = f"{DOMAIN}_history"

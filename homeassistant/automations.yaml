@@ -117,7 +117,7 @@
 
 # 9) MyGate visitor at the gate → phone notification with Approve / Deny buttons.
 #    The MyGate integration (custom_components/mygate) publishes MyGate's alerts to MQTT, and
-#    the tablet already shows them itself (chime + card + 15 s wake). This adds the phone,
+#    the tablet already shows them itself (chime + card + 30 s wake). This adds the phone,
 #    where a button press answers the visitor through mygate.respond. The notification is
 #    cleared once the visitor is answered (here or elsewhere) or times out.
 - alias: "Tablet — MyGate visitor, ask on phone"

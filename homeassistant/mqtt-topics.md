@@ -71,7 +71,7 @@ visitor's photo, name and where they're from (`visitor`) come first, whenever th
   card shows "Sending…", then the outcome, or the error from `…/mygate/response`.
 - While such a card is waiting, a screen-off from outside (`command/screen OFF`,
   `command/sleep`, the HTTP API) is held until the card closes.
-- Any other alert shows for 15 s.
+- Any other alert shows for 30 s.
 
 If the screen was off, the tablet wakes it and switches it back off when the card closes. If
 someone is already using the tablet, the screen is left on. `update: true` messages refresh the
@@ -119,7 +119,7 @@ minimum `title`) gets the same treatment.
 | `actions` | Labels of MyGate's buttons, e.g. `Approve`, `Deny`, `Leave at gate`, `View details` |
 | `timeoutMs` | How long MyGate keeps an approval request up (`0` = no timeout) |
 | `responses` | Integration only: what can be sent back for this visitor (`approve`, `deny`, and `leave_at_gate` for deliveries). Empty when the alert can't be answered. |
-| `visitor` | Integration only, each field when MyGate sends it: `name`; `company`, where they're from (`Swiggy`, `Amazon`…) with its `company_logo` URL; `image`, the guard's photo of the visitor; `type` (`guest`, `delivery`, `cab`, or MyGate's numeric type); `nature`, MyGate's description of the visit |
+| `visitor` | Integration only, each field when MyGate sends it: `name`; `company`, where they're from (`Swiggy`, `Amazon`…) with its `company_logo` URL; `image`, the guard's photo of the visitor; `type` (`guest`, `delivery`, `cab`, or MyGate's numeric type); `nature`, MyGate's description of the visit. Check-in notices name the visitor only in their text ("Ramesh from Blinkit has checked in…"), so `name` and `company` are read from it. |
 | `test` | Integration only: `true` for MyGate's test alert |
 
 `doormonitor/mygate/notification_removed` has the same fields plus `reason`:
@@ -167,6 +167,25 @@ can't reach Home Assistant. It's worth an automation that tells you when it goes
 can sign Home Assistant out on its side, and then simply stops sending alerts. The integration
 checks for this hourly; when it happens, the sensor goes off and Home Assistant asks you to sign
 in again. Deleting the integration signs it out of MyGate.
+
+It keeps a history of the latest 100 alerts across restarts, with how each visitor was answered:
+approved or denied (here or on another phone, and by whom when MyGate says), left at the gate,
+or not answered. Test alerts are included, marked as such. To show it, add the **MyGate
+history** card to a dashboard (Edit dashboard → Add card; it comes with the integration, there's
+nothing else to install). Each alert shows the visitor's photo, name and where they're from,
+with the time and outcome; tap one for its full text and a large photo. Options, in YAML or the
+card's editor:
+
+```yaml
+type: custom:mygate-history-card
+title: Visitors         # optional; "" for no header
+limit: 10               # alerts shown before "Show more"
+types: [approval]       # optional: only approval, general, vehicle and/or emergency alerts
+```
+
+The history lives in the `history` attribute of **MyGate Last alert**, a sensor holding when the
+latest alert came, with its visitor's photo as the entity picture. The recorder leaves `history`
+out.
 
 This is unofficial. It sends MyGate's servers what the MyGate app sends, worked out from the
 app's code, and identifies itself as your phone. MyGate's terms probably don't allow that, and a

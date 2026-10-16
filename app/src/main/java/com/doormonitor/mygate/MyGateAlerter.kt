@@ -316,7 +316,7 @@ class MyGateAlerter(
 
     companion object {
         private const val TAG = "MyGateAlerter"
-        const val DISPLAY_SECONDS = 15
+        const val DISPLAY_SECONDS = 30
 
         /** How long the outcome ("Approved") stays up before the card closes. */
         private const val OUTCOME_SECONDS = 4

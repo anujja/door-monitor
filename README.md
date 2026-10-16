@@ -62,13 +62,14 @@ All responses are JSON. Optional password (`?password=…` or `Authorization: Be
   - the **MyGate integration for Home Assistant**
     ([`homeassistant/custom_components/mygate`](homeassistant/custom_components/mygate)). It
     receives MyGate's alerts directly, so MyGate needn't be installed on the tablet, and it can
-    approve or deny visitors (`mygate.respond`, or MQTT `…/mygate/respond`); or
+    approve or deny visitors (`mygate.respond`, or MQTT `…/mygate/respond`). It keeps a
+    history of visitors, shown by its **MyGate history** dashboard card; or
   - the tablet itself, relaying MyGate's notifications when MyGate is signed in on it and
     **Notification access** is granted.
 - The tablet subscribes to that topic too. It rings a chime, wakes the screen and shows the
   alert as a card led by the visitor's photo, name and company (Swiggy, Amazon…). A visitor
   waiting at the gate gets **Approve / Deny** buttons and stays on screen until answered; other
-  alerts show for 15 s. Then the screen sleeps again. See
+  alerts show for 30 s. Then the screen sleeps again. See
   [MQTT topics](homeassistant/mqtt-topics.md#mygate-notifications).
 
 ### Motion-based wake (optional)

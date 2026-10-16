@@ -42,6 +42,11 @@
       "push_connected": {
         "name": "Alerts connected"
       }
+    },
+    "sensor": {
+      "last_alert": {
+        "name": "Last alert"
+      }
     }
   },
   "selector": {
