@@ -27,6 +27,7 @@ import com.doormonitor.mqtt.MqttManager
 import com.doormonitor.mygate.MyGateAlerter
 import com.doormonitor.mygate.MyGateBus
 import com.doormonitor.mygate.MyGateEvent
+import com.doormonitor.mygate.MyGateFilter
 import com.doormonitor.screen.ScreenController
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
@@ -78,7 +79,8 @@ class KioskForegroundService : LifecycleService() {
             lifecycleScope,
             wakeFor = { seconds -> handler.wakeFor(seconds) },
             screenOff = { screen.screenOff() },
-            publishResponse = { id, response -> mqtt.publishMyGateResponse(id, response) }
+            publishResponse = { id, response -> mqtt.publishMyGateResponse(id, response) },
+            filter = MyGateFilter { handler.settings.myGateShowPattern }
         )
         handler.screenOffHold = myGateAlerter::holdScreenOff
         mqtt = MqttManager(handler, onMyGate = myGateAlerter::onMqtt)

@@ -72,6 +72,12 @@ visitor's photo, name and where they're from (`visitor`) come first, whenever th
 - While such a card is waiting, a screen-off from outside (`command/screen OFF`,
   `command/sleep`, the HTTP API) is held until the card closes.
 - Any other alert shows for 30 s.
+- Only alerts whose text matches the tablet's **MyGate alerts** setting are shown, so MyGate's
+  marketing pushes stay off the screen. It's a regular expression, matched anywhere in the text
+  and ignoring case; the default, `.*(checked|approv|declined|denied|invite|kid).*`, keeps
+  check-ins (visitors, and vehicles in or out), approval requests and their outcomes, declined
+  or denied entries, invites and alerts about kids. Blank shows everything. A visitor waiting
+  for an answer and an emergency always show.
 
 If the screen was off, the tablet wakes it and switches it back off when the card closes. If
 someone is already using the tablet, the screen is left on. `update: true` messages refresh the
@@ -181,7 +187,12 @@ type: custom:mygate-history-card
 title: Visitors         # optional; "" for no header
 limit: 10               # alerts shown before "Show more"
 types: [approval]       # optional: only approval, general, vehicle and/or emergency alerts
+filter: "(checked|approv)"  # optional: only alerts whose text matches this regular expression
 ```
+
+`filter` is matched anywhere in the alert's text, ignoring case. Left out, it's the tablet's
+default above, which hides MyGate's marketing; `.*` shows everything. Visitors who could be
+answered and emergencies always show.
 
 The history lives in the `history` attribute of **MyGate Last alert**, a sensor holding when the
 latest alert came, with its visitor's photo as the entity picture. The recorder leaves `history`

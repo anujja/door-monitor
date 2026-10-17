@@ -10,9 +10,17 @@
  *   title: Visitors                    # optional; empty for no header
  *   limit: 10                          # alerts shown before "Show more"
  *   types: [approval, general]         # optional: only these (approval, general, vehicle, emergency)
+ *   filter: "(checked|approv)"         # optional: only alerts whose text matches; see DEFAULT_FILTER
  */
 
 const CARD = "mygate-history-card";
+
+/**
+ * Alerts shown when the card sets no `filter`: those whose text has one of these words, ignoring
+ * case. That keeps check-ins, approvals and their outcomes, invites and kids' alerts, and hides
+ * MyGate's marketing. The tablet's own filter defaults to the same. `.*` shows everything.
+ */
+const DEFAULT_FILTER = ".*(checked|approv|declined|denied|invite|kid).*";
 
 const TYPES = {
   approval: "Visitors at the gate",
@@ -171,6 +179,7 @@ function defineCard() {
           { name: "entity", selector: { entity: { domain: "sensor", integration: "mygate" } } },
           { name: "title", selector: { text: {} } },
           { name: "limit", selector: { number: { min: 1, max: 100, mode: "box" } } },
+          { name: "filter", selector: { text: {} } },
           {
             name: "types",
             selector: {
@@ -187,13 +196,23 @@ function defineCard() {
             title: "Title",
             limit: "Alerts shown before \"Show more\"",
             types: "Only these alerts (all when empty)",
+            filter: "Only alerts whose text matches (regular expression)",
           })[field.name],
+        computeHelper: (field) =>
+          field.name === "filter"
+            ? `Anywhere in the text, ignoring case. Visitors waiting at the gate and emergencies always show. Empty uses ${DEFAULT_FILTER}, which hides MyGate's marketing; .* shows everything.`
+            : undefined,
       };
     }
 
     setConfig(config) {
       if (config.types != null && !Array.isArray(config.types)) {
         throw new Error("types must be a list, e.g. [approval, general]");
+      }
+      try {
+        this._filter = new RegExp(config.filter || DEFAULT_FILTER, "i");
+      } catch (err) {
+        throw new Error(`filter isn't a valid regular expression: ${err.message}`);
       }
       this._config = { title: "MyGate", limit: 10, ...config };
       this._shown = Number(this._config.limit) || 10;
@@ -222,7 +241,14 @@ function defineCard() {
     _entries() {
       const history = this._stateObj?.attributes?.history;
       const types = this._config?.types?.length ? this._config.types : null;
-      return (Array.isArray(history) ? history : []).filter((e) => !types || types.includes(e.type));
+      return (Array.isArray(history) ? history : []).filter(
+        (e) => (!types || types.includes(e.type)) && this._matches(e),
+      );
+    }
+
+    /** The filter, except that visitors who could be answered and emergencies always show. */
+    _matches(entry) {
+      return entry.outcome != null || entry.type === "emergency" || this._filter.test(entry.text ?? "");
     }
 
     _onClick(ev) {

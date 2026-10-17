@@ -1,5 +1,7 @@
 package com.doormonitor.data
 
+import com.doormonitor.mygate.MyGateFilter
+
 /**
  * Immutable snapshot of all user configuration. Produced by [SettingsRepository] as a
  * cold Flow so any component (UI, service, MQTT, HTTP) reacts to changes consistently.
@@ -35,6 +37,14 @@ data class AppSettings(
     val defaultBrightness: Int = 160,
     /** If true the screen stays on permanently (overrides timeout). */
     val keepScreenOn: Boolean = true,
+
+    // --- MyGate alerts ---
+    /**
+     * Only MyGate alerts whose text matches this regular expression show on the tablet (anywhere
+     * in the text, ignoring case); the rest, such as MyGate's marketing, are skipped. Blank shows
+     * every alert. See [com.doormonitor.mygate.MyGateFilter].
+     */
+    val myGateShowPattern: String = MyGateFilter.DEFAULT_PATTERN,
 
     // --- Motion / wake triggers ---
     val wakeOnMotion: Boolean = true,

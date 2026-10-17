@@ -88,7 +88,8 @@ object MyGateAlerts {
  * lists `responses` (the Home Assistant MyGate integration does). A tap publishes to
  * `<base>/mygate/respond`, and the card follows the outcome on `…/response` and
  * `…/notification_removed`. Such a card stays up until the visitor is answered (here or
- * anywhere else) or MyGate gives up; other alerts show for [DISPLAY_SECONDS].
+ * anywhere else) or MyGate gives up; other alerts show for [DISPLAY_SECONDS]. Alerts the
+ * [MyGateFilter] rejects (MyGate's marketing) aren't shown at all.
  *
  * Only puts the screen back to sleep if an alert is what woke it: someone already using the
  * tablet gets the card and chime, but the screen is left on.
@@ -100,7 +101,9 @@ class MyGateAlerter(
     /** Switches the screen off directly, past [holdScreenOff]. */
     private val screenOff: () -> Unit,
     /** Publishes an answer; false when it can't (MQTT down). */
-    private val publishResponse: (id: String, response: String) -> Boolean
+    private val publishResponse: (id: String, response: String) -> Boolean,
+    /** Which alerts to show at all; the rest are skipped without a sound. */
+    private val filter: MyGateFilter
 ) {
     private val power = appContext.getSystemService(Context.POWER_SERVICE) as PowerManager
 
@@ -158,6 +161,13 @@ class MyGateAlerter(
             ?.let { a -> List(a.length()) { a.optString(it) } }
             ?.filter { it in RESPONSE_LABELS }
             .orEmpty()
+        val type = payload.optString("event_type", MyGateNotificationListener.TYPE_GENERAL)
+        val title = payload.optStringOrNull("title") ?: "MyGate"
+        val texts = listOf(payload.optStringOrNull("text"), payload.optStringOrNull("bigText"))
+        if (!filter.shows(type, texts, awaitsAnswer = responses.isNotEmpty())) {
+            DiskLog.i(TAG, "not shown, text doesn't match the filter: $title")
+            return
+        }
         val postTime = payload.optLong("postTime", now)
         val timeoutMs = payload.optLong("timeoutMs", 0)
         val expiresAt = if (responses.isNotEmpty() && timeoutMs > 0) {
@@ -170,9 +180,9 @@ class MyGateAlerter(
             ?.takeIf { id != null && it.id == id && responses.isNotEmpty() }
         val alert = MyGateAlert(
             id = id,
-            type = payload.optString("event_type", MyGateNotificationListener.TYPE_GENERAL),
-            title = payload.optStringOrNull("title") ?: "MyGate",
-            text = payload.optStringOrNull("bigText") ?: payload.optStringOrNull("text").orEmpty(),
+            type = type,
+            title = title,
+            text = texts[1] ?: texts[0].orEmpty(),
             visitor = payload.optJSONObject("visitor")?.let { v ->
                 MyGateVisitor(
                     name = v.optStringOrNull("name"),

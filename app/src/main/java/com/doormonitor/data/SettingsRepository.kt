@@ -8,6 +8,7 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import com.doormonitor.mygate.MyGateFilter
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import kotlinx.serialization.decodeFromString
@@ -49,6 +50,7 @@ class SettingsRepository(private val context: Context) {
             deviceId = this[Keys.DEVICE_ID] ?: "doormonitor",
             haBaseUrl = this[Keys.HA_URL] ?: "",
             haLongLivedToken = this[Keys.HA_TOKEN] ?: "",
+            myGateShowPattern = this[Keys.MYGATE_SHOW_PATTERN] ?: MyGateFilter.DEFAULT_PATTERN,
             screenTimeoutSeconds = this[Keys.SCREEN_TIMEOUT] ?: 60,
             defaultBrightness = this[Keys.DEFAULT_BRIGHTNESS] ?: 160,
             keepScreenOn = this[Keys.KEEP_SCREEN_ON] ?: true,
@@ -80,6 +82,7 @@ class SettingsRepository(private val context: Context) {
             prefs[Keys.DEVICE_ID] = next.deviceId
             prefs[Keys.HA_URL] = next.haBaseUrl
             prefs[Keys.HA_TOKEN] = next.haLongLivedToken
+            prefs[Keys.MYGATE_SHOW_PATTERN] = next.myGateShowPattern
             prefs[Keys.SCREEN_TIMEOUT] = next.screenTimeoutSeconds
             prefs[Keys.DEFAULT_BRIGHTNESS] = next.defaultBrightness
             prefs[Keys.KEEP_SCREEN_ON] = next.keepScreenOn
@@ -108,6 +111,7 @@ class SettingsRepository(private val context: Context) {
         val DEVICE_ID = stringPreferencesKey("device_id")
         val HA_URL = stringPreferencesKey("ha_url")
         val HA_TOKEN = stringPreferencesKey("ha_token")
+        val MYGATE_SHOW_PATTERN = stringPreferencesKey("mygate_show_pattern")
         val SCREEN_TIMEOUT = intPreferencesKey("screen_timeout")
         val DEFAULT_BRIGHTNESS = intPreferencesKey("default_brightness")
         val KEEP_SCREEN_ON = booleanPreferencesKey("keep_screen_on")

@@ -55,6 +55,7 @@ import com.doormonitor.data.AppSettings
 import com.doormonitor.data.CameraDef
 import com.doormonitor.data.CameraType
 import com.doormonitor.kiosk.DeviceAdminReceiver
+import com.doormonitor.mygate.MyGateFilter
 import com.doormonitor.mygate.MyGateNotificationListener
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -164,6 +165,13 @@ fun SettingsScreen(
                 }
             }
             item { MyGateRelaySetting(settings.deviceId) }
+
+            item { SectionTitle("MyGate alerts") }
+            item {
+                MyGateFilterSetting(settings.myGateShowPattern) { v ->
+                    onChange { it.copy(myGateShowPattern = v) }
+                }
+            }
 
             item { SectionTitle("Screen") }
             item {
@@ -470,6 +478,46 @@ private fun MyGateRelaySetting(deviceId: String) {
                     }
                 }) { Text("Grant notification access") }
             }
+        }
+    }
+}
+
+/**
+ * The pattern that decides which MyGate alerts the tablet shows ([MyGateFilter]). Flags a pattern
+ * that doesn't compile (every alert shows until it's fixed), and offers the default back.
+ */
+@Composable
+private fun MyGateFilterSetting(value: String, onValueChange: (String) -> Unit) {
+    // Same focus-aware local-state pattern as TextSetting (see note there).
+    var focused by remember { mutableStateOf(false) }
+    var text by remember { mutableStateOf(value) }
+    if (!focused && text != value) text = value
+    val error = MyGateFilter.patternError(text)
+
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        OutlinedTextField(
+            value = text,
+            onValueChange = { text = it; onValueChange(it) },
+            label = { Text("Show only alerts whose text matches (regex)") },
+            singleLine = true,
+            isError = error != null,
+            supportingText = {
+                Text(
+                    if (error != null) "Not a valid pattern, so every alert shows: $error"
+                    else "Matched anywhere in the alert's text, ignoring case; blank shows every " +
+                        "alert. Anything else, such as MyGate's marketing, is skipped. Visitors " +
+                        "waiting at the gate and emergencies always show."
+                )
+            },
+            modifier = Modifier
+                .fillMaxWidth()
+                .onFocusChanged { focused = it.isFocused }
+        )
+        if (text != MyGateFilter.DEFAULT_PATTERN) {
+            TextButton(onClick = {
+                text = MyGateFilter.DEFAULT_PATTERN
+                onValueChange(MyGateFilter.DEFAULT_PATTERN)
+            }) { Text("Reset to default") }
         }
     }
 }
