@@ -26,6 +26,7 @@ from .const import (
     CONF_DEVICE_ID,
     CONF_FCM_CREDENTIALS,
     CONF_FLAT_ID,
+    CONF_PHONE,
     CONF_TOPIC,
     CONF_USER_ID,
     DEFAULT_TOPIC,
@@ -193,6 +194,8 @@ class MyGateHub:
     async def async_start(self) -> None:
         await self.history.async_load()
         await self._refresh_token_registration()
+        if not self.flat_id:
+            await self._fetch_flat_id()
         try:
             await self._listener.start()
         except Exception as err:  # noqa: BLE001 - the health check retries
@@ -259,6 +262,25 @@ class MyGateHub:
             self._on_signed_out()
         except MyGateError as err:
             _LOGGER.warning("Could not refresh MyGate push registration: %s", err)
+
+    async def _fetch_flat_id(self) -> None:
+        """Answers name the resident's flat. Sign-ins before 0.2.1 didn't keep it."""
+        if self._signed_out:
+            return
+        try:
+            info = await self.api.user_info(self.user_id, self.entry.data[CONF_PHONE], self.push_token)
+        except MyGateAuthError:
+            self._on_signed_out()
+            return
+        except MyGateError as err:
+            _LOGGER.warning("Could not look up the MyGate flat: %s", err)
+            return
+        if flat_id := str(info.get("activeflat") or ""):
+            self.hass.config_entries.async_update_entry(
+                self.entry, data={**self.entry.data, CONF_FLAT_ID: flat_id}
+            )
+        else:
+            _LOGGER.warning("MyGate's profile names no active flat; answers are sent without one")
 
     @callback
     def _on_credentials(self, credentials: dict[str, Any]) -> None:
@@ -468,7 +490,7 @@ class MyGateHub:
             # MyGate's own test alert is answered on the phone without telling the server.
             data = alert.data
             try:
-                await self.api.respond(
+                reply = await self.api.respond(
                     data["replyto"],
                     user_id=self.user_id,
                     flat_id=_text(data, "flat_id", "flatid", "flatId") or self.flat_id,
@@ -483,8 +505,10 @@ class MyGateHub:
                 raise HomeAssistantError("MyGate signed this device out; sign in again") from err
             except MyGateError as err:
                 raise HomeAssistantError(f"MyGate did not accept the {response}: {err}") from err
+            _LOGGER.info("Answered MyGate visitor %s: %s; MyGate replied %s", alert_id, response, reply)
+        else:
+            _LOGGER.info("Answered MyGate's test alert: %s", response)
 
-        _LOGGER.info("Answered MyGate visitor %s: %s%s", alert_id, response, " (test)" if alert.test else "")
         self.pending.pop(alert_id, None)
         if alert.expire:
             alert.expire()

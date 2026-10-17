@@ -106,7 +106,9 @@ class MyGateConfigFlow(ConfigFlow, domain=DOMAIN):
                         CONF_DEVICE_ID: self._device_id,
                         CONF_API_KEY: profile["api_key"],
                         CONF_USER_ID: str(profile["userid"]),
-                        CONF_FLAT_ID: str(profile.get("flatid") or "") or None,
+                        CONF_FLAT_ID: str(
+                            profile.get("activeflat") or profile.get("flatid") or ""
+                        ) or None,
                         CONF_FCM_CREDENTIALS: self._fcm_credentials,
                     }
                     if self.source == SOURCE_REAUTH:

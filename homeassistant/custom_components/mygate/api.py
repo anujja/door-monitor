@@ -186,6 +186,27 @@ class MyGateApi:
             },
         )
 
+    async def user_info(self, user_id: str, phone: str, push_token: str) -> dict[str, Any]:
+        """The resident's profile, as the app fetches it after signing in. `activeflat` is their flat."""
+        return await self._call(
+            "POST",
+            "/user/v3/info",
+            {
+                "carrier_name": PHONE_CARRIER,
+                "osversion": PHONE_SDK,
+                "model": PHONE_MODEL,
+                "appversion": APP_VERSION,
+                "deviceid": self.device_id,
+                "type": "N",
+                "permissions": ["NOTIFICATION"],
+                "gcmid": push_token,
+                "userid": user_id,
+                "mobile": phone,
+                "showallflats": "1",
+                "version": "7",
+            },
+        )
+
     async def send_test_alert(self, user_id: str, flat_id: str | None, push_token: str) -> None:
         """Ask MyGate to push its "Visitor Notification Test" to this device only."""
         await self._call(
@@ -233,13 +254,14 @@ class MyGateApi:
         notification_id: str | None,
         status: str,
         invited: bool = False,
-    ) -> None:
+    ) -> dict[str, Any]:
         """Approve ("A"), deny ("D") or leave at gate ("L") a visitor waiting at the gate.
 
         `reply_to` comes from the alert itself; the app posts there rather than to a fixed path.
         `invited`: the alert carried `invite_validation`, for which the app adds its device id.
+        Returns MyGate's reply. Like the app, anything but es=0 is a refusal.
         """
-        await self._call(
+        data = await self._call(
             "POST",
             reply_to,
             {
@@ -255,6 +277,9 @@ class MyGateApi:
                 "valstatus": status,
             },
         )
+        if str(data.get("es")) != "0":
+            raise MyGateError(data.get("message") or f"MyGate did not confirm it (es={data.get('es')})")
+        return data
 
     async def logout(self, user_id: str) -> None:
         """Remove this device from the account so MyGate stops pushing to it."""
