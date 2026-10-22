@@ -81,8 +81,10 @@ All responses are JSON. Optional password (`?password=…` or `Authorization: Be
   bus is underway follows it — over Roo's live-tracking socket when it can — publishing the bus's
   position to `<deviceId>/roorides/bus`. It exposes a **device_tracker**, a status/ETA sensor and
   an **en-route** binary_sensor.
-- A conditional Map card on the dashboard the tablet shows takes the screen over with the moving
-  bus while a pickup or drop is active, and an automation keeps the screen on for the trip. See
+- While a pickup or drop is active, the tablet switches itself to a dedicated full-screen bus
+  **map** (via the `navigate` command) and keeps the screen on; it returns to the normal
+  dashboard when the trip ends. A doorbell during the trip shows the camera, then auto-returns
+  to the map once the visitor leaves (via the `dashboard` command). See
   [MQTT topics](homeassistant/mqtt-topics.md#roo-commuter-bus-tracking).
 
 ### Motion-based wake (optional)

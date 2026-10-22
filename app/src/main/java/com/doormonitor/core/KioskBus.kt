@@ -14,6 +14,12 @@ sealed interface KioskCommand {
     data object ReloadDashboard : KioskCommand
     data object LoadDashboard : KioskCommand
 
+    /** Dismiss any camera overlay / full-screen camera and return to the dashboard. */
+    data object ReturnToDashboard : KioskCommand
+
+    /** Point the dashboard WebView at [url] (used to switch to a full-screen view and back). */
+    data class NavigateTo(val url: String) : KioskCommand
+
     /** Turn the screen on at the window level (FLAG_TURN_SCREEN_ON + keyguard dismiss). */
     data object WindowScreenOn : KioskCommand
 

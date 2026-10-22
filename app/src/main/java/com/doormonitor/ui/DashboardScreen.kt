@@ -68,6 +68,7 @@ fun DashboardScreen(
             when (cmd) {
                 KioskCommand.ReloadDashboard -> webViewRef?.reload()
                 KioskCommand.LoadDashboard -> webViewRef?.loadUrl(url)
+                is KioskCommand.NavigateTo -> webViewRef?.loadUrl(cmd.url)
                 else -> Unit
             }
         }

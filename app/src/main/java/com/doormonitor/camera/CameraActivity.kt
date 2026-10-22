@@ -20,9 +20,13 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.lifecycleScope
+import com.doormonitor.core.KioskBus
+import com.doormonitor.core.KioskCommand
 import com.doormonitor.data.SettingsRepository
 import com.doormonitor.ui.theme.DoorMonitorTheme
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
 
 /**
  * Dedicated full-screen camera activity. Launched via the local API/MQTT (`/camera?id=`)
@@ -39,6 +43,14 @@ class CameraActivity : ComponentActivity() {
             hide(WindowInsetsCompat.Type.systemBars())
             systemBarsBehavior =
                 WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        }
+
+        // A return-to-dashboard command (MQTT `command/dashboard`, HTTP `/dashboard`) finishes
+        // this full-screen camera so the tablet lands back on the dashboard without a manual tap.
+        lifecycleScope.launch {
+            KioskBus.commands.collect { cmd ->
+                if (cmd is KioskCommand.ReturnToDashboard) finish()
+            }
         }
 
         val repo = SettingsRepository(applicationContext)

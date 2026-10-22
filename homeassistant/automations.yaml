@@ -169,11 +169,12 @@
           tag: "mygate-{{ trigger.payload_json.id }}"
   mode: queued
 
-# 10) School bus (Roo Commuter integration): take the tablet over with the bus map and keep the
-#     screen on while a pickup/drop is active. The dashboard swap is a conditional card on the
-#     Overview view gated on this same binary_sensor; this part only handles the screen.
-#     Replace the entity id with your own `binary_sensor.<child>_s_bus_en_route`.
-- alias: "Tablet — keep on while the school bus is en route"
+# 10) School bus (Roo Commuter integration): full-screen bus map on the tablet during a trip.
+#     The tablet switches to a dedicated panel "bus map" dashboard (`/roo-bus`) while the child's
+#     pickup/drop is active, keeps the screen on, and returns to the normal dashboard at trip end.
+#     HA sections dashboards cap card width, so the full-screen map lives in a panel view the
+#     tablet navigates to. Replace the entity ids with your own.
+- alias: "Tablet — show the bus map while en route"
   trigger:
     - platform: state
       entity_id: binary_sensor.kabir_jain_s_bus_en_route
@@ -189,13 +190,47 @@
         - conditions: [{ condition: trigger, id: start }]
           sequence:
             - service: mqtt.publish
-              data:
-                topic: "doormonitor/command/wake"
-                payload: ""
+              data: { topic: "doormonitor/command/wake", payload: "" }
+            - service: mqtt.publish
+              data: { topic: "doormonitor/command/navigate", payload: "/roo-bus" }
         - conditions: [{ condition: trigger, id: end }]
           sequence:
             - service: mqtt.publish
-              data:
-                topic: "doormonitor/command/sleep"
-                payload: ""
+              data: { topic: "doormonitor/command/navigate", payload: "/lovelace" }
+            - service: mqtt.publish
+              data: { topic: "doormonitor/command/sleep", payload: "" }
   mode: queued
+
+# 11) Keep the tablet screen on through the whole trip: if anything (doorbell, person timeout)
+#     sleeps it while en route, wake it again.
+- alias: "Tablet — hold screen on during the bus trip"
+  trigger:
+    - platform: state
+      entity_id: switch.door_monitor_doormonitor_screen
+      to: "off"
+  condition:
+    - condition: state
+      entity_id: binary_sensor.kabir_jain_s_bus_en_route
+      state: "on"
+  action:
+    - service: mqtt.publish
+      data: { topic: "doormonitor/command/wake", payload: "" }
+  mode: single
+
+# 12) During a trip, when the person at the door has gone, close the doorbell camera so the
+#     tablet returns to the bus map (needs the `command/dashboard` support in the app).
+- alias: "Tablet — close doorbell camera during a trip"
+  trigger:
+    - platform: state
+      entity_id: binary_sensor.front_door_person
+      from: "on"
+      to: "off"
+      for: "00:00:15"
+  condition:
+    - condition: state
+      entity_id: binary_sensor.kabir_jain_s_bus_en_route
+      state: "on"
+  action:
+    - service: mqtt.publish
+      data: { topic: "doormonitor/command/dashboard", payload: "" }
+  mode: single

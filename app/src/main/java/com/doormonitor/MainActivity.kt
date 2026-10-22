@@ -224,6 +224,9 @@ class MainActivity : ComponentActivity() {
                     KioskCommand.WindowScreenOn -> applyScreenOnFlags()
                     KioskCommand.WindowAllowSleep -> clearKeepScreenOn()
                     KioskCommand.ReapplyImmersive -> kiosk.enterImmersive()
+                    // Close the on-dashboard camera overlay (a full-screen CameraActivity
+                    // finishes itself; see CameraActivity) so we land back on the dashboard.
+                    KioskCommand.ReturnToDashboard -> cameraOverlayId.value = null
                     else -> Unit
                 }
             }

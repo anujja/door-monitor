@@ -12,6 +12,8 @@ below with yours. The app speaks MQTT 3.1.1 and is Mosquitto-compatible.
 | `doormonitor/command/wake` | *(empty)* or seconds | Permanent wake / temporary wake for N s |
 | `doormonitor/command/sleep` | *(any)* | Screen off |
 | `doormonitor/command/reload` | *(any)* | Reload dashboard |
+| `doormonitor/command/dashboard` | *(any)* | Close any camera view and return to the dashboard |
+| `doormonitor/command/navigate` | `<path or URL>` | Point the dashboard at a path (e.g. `/roo-bus`), then back |
 | `doormonitor/command/camera` | `<camera_id>` | Open camera full-screen |
 | `doormonitor/command/motion` | *(any)* | Motion wake (honors `wakeOnMotion`) |
 | `doormonitor/command/doorbell` | *(any)* | Doorbell wake (+ door camera if defined) |
@@ -246,8 +248,10 @@ The **Roo Commuter integration** ([`custom_components/roorides`](custom_componen
 signs in to the parent's Roo (roorides.com) account, polls the child's live tracking, and while
 the bus is underway follows it — over Roo's live-tracking socket when it can — and publishes the
 bus's position to `doormonitor/roorides/bus` (retained). It also exposes a `device_tracker`, a
-status/ETA `sensor` and an "en route" `binary_sensor`, so a Map card on the wall dashboard shows
-the bus move while it is on its way.
+status/ETA `sensor` and an "en route" `binary_sensor`. On the tablet, a dedicated full-screen
+map **panel** dashboard shows the bus; an automation switches the tablet to it (and keeps the
+screen on) while a trip is active, then back to the normal dashboard when it ends — using the
+`navigate`/`dashboard`/`wake`/`sleep` commands above.
 
 Roo only hands a parent the bus while the child's own trip is active; off-trip the position
 stays at its last point and the bus is marked not running.
@@ -283,9 +287,14 @@ insensitively, so the bus shows up regardless.)*
 2. Settings → Devices & services → Add integration → **Roo Commuter**. Enter the phone number
    and password you use with the Roo Commuter app, then pick the child. Home Assistant signs in
    to your Roo account and keeps the session alive by refreshing its token.
-3. Add a **Map** card to the wall dashboard showing `device_tracker.<child>_s_bus_location`, and
-   (optionally) the status sensor beside it. The bus appears while it is on its way to or from
-   school.
+3. For the tablet takeover: a **panel** dashboard (one full-width `map` card on
+   `device_tracker.<child>_s_bus_location`) is the full-screen bus view the tablet switches to.
+   An automation on the **en route** `binary_sensor` publishes `command/navigate` to that
+   dashboard and `command/wake` on trip start, and `command/navigate` back plus `command/sleep`
+   on trip end; a second keeps the screen on if anything sleeps it mid-trip; a third fires
+   `command/dashboard` to close the doorbell camera when the visitor leaves. See the Roo
+   automations in [`automations.yaml`](automations.yaml). HA's sections dashboards cap card
+   width, so the bus map needs a **panel** view to go edge to edge.
 
 This is unofficial: it calls the same parent API the Roo app calls, worked out from the app and
 Roo's web bundle. A Roo update can break it. Unlike some apps Roo uses refresh tokens, so Home

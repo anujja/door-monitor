@@ -18,6 +18,8 @@ import org.json.JSONObject
  *   GET /sleep         alias for /screenOff
  *   GET /brightness?value=0..255   set brightness
  *   GET /reload        reload the dashboard
+ *   GET /dashboard     return to the dashboard (close any camera view)
+ *   GET /navigate?url=/roo-bus     load a dashboard path/URL (switch view, then back)
  *   GET /camera?id=front_door      open a camera full-screen
  *   GET /event?type=motion|doorbell  motion/doorbell wake (used by HA webhook)
  *
@@ -56,6 +58,13 @@ class LocalHttpServer(
                     ok("brightness", JSONObject().put("value", v.coerceIn(0, 255)))
                 }
                 "/reload" -> { handler.reloadDashboard(); ok("reload") }
+                "/dashboard" -> { handler.returnToDashboard(); ok("dashboard") }
+                "/navigate" -> {
+                    val target = params["url"]?.firstOrNull() ?: params["path"]?.firstOrNull()
+                        ?: return json(Response.Status.BAD_REQUEST, error("missing url"))
+                    handler.navigateTo(target)
+                    ok("navigate", JSONObject().put("url", target))
+                }
                 "/camera" -> {
                     val id = params["id"]?.firstOrNull()
                         ?: return json(Response.Status.BAD_REQUEST, error("missing id"))
@@ -91,8 +100,8 @@ class LocalHttpServer(
         put("endpoints", org.json.JSONArray(
             listOf(
                 "/status", "/screenOn", "/screenOff", "/wake", "/wake?seconds=30",
-                "/sleep", "/brightness?value=20", "/reload", "/camera?id=<id>",
-                "/event?type=motion"
+                "/sleep", "/brightness?value=20", "/reload", "/dashboard",
+                "/navigate?url=/roo-bus", "/camera?id=<id>", "/event?type=motion"
             )
         ))
     }

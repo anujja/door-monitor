@@ -2,6 +2,7 @@ package com.doormonitor.core
 
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import android.os.Build
 import com.doormonitor.MainActivity
 import com.doormonitor.battery.BatteryMonitor
@@ -73,6 +74,29 @@ class CommandHandler(
     }
 
     fun reloadDashboard() = KioskBus.emit(KioskCommand.ReloadDashboard)
+
+    /** Dismiss any camera overlay / full-screen camera and bring the dashboard back. */
+    fun returnToDashboard() {
+        KioskBus.emit(KioskCommand.ReturnToDashboard)
+        bringDashboardToFront()
+    }
+
+    /**
+     * Point the dashboard at [target]: a full URL, or a path/one resolved against the
+     * configured dashboard's scheme+host (so `/roo-bus` lands on the same Home Assistant).
+     */
+    fun navigateTo(target: String) {
+        val trimmed = target.trim()
+        val url = if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
+            trimmed
+        } else {
+            val base = Uri.parse(settings.dashboardUrl)
+            val origin = "${base.scheme}://${base.authority}"
+            origin + if (trimmed.startsWith("/")) trimmed else "/$trimmed"
+        }
+        KioskBus.emit(KioskCommand.NavigateTo(url))
+        bringDashboardToFront()
+    }
 
     /**
      * Show a camera. Launches [MainActivity] (singleTask) with the camera id so it works even
