@@ -26,6 +26,8 @@ below with yours. The app speaks MQTT 3.1.1 and is Mosquitto-compatible.
 | `doormonitor/mygate/notification` | no | JSON — a MyGate alert (from the MyGate integration, or from the tablet) |
 | `doormonitor/mygate/notification_removed` | no | JSON — that alert was answered or went away |
 | `doormonitor/mygate/response` | no | JSON — how an answer to a visitor went (MyGate integration) |
+| `doormonitor/roorides/bus` | yes | JSON — the school bus's latest position and status (Roo Commuter integration) |
+| `doormonitor/roorides/available` | yes | `online` / `offline` — whether the Roo integration is running |
 
 `doormonitor/state` example:
 ```json
@@ -233,4 +235,58 @@ mosquitto_sub -h 192.168.1.10 -t 'doormonitor/mygate/#' -v
 
 # Approve the visitor waiting at the gate (needs the MyGate integration)
 mosquitto_pub -h 192.168.1.10 -t doormonitor/mygate/respond -m approve
+
+# Follow the school bus (needs the Roo Commuter integration)
+mosquitto_sub -h 192.168.1.10 -t 'doormonitor/roorides/#' -v
 ```
+
+## Roo Commuter bus tracking
+
+The **Roo Commuter integration** ([`custom_components/roorides`](custom_components/roorides))
+signs in to the parent's Roo (roorides.com) account, polls the child's live tracking, and while
+the bus is underway follows it — over Roo's live-tracking socket when it can — and publishes the
+bus's position to `doormonitor/roorides/bus` (retained). It also exposes a `device_tracker`, a
+status/ETA `sensor` and an "en route" `binary_sensor`, so a Map card on the wall dashboard shows
+the bus move while it is on its way.
+
+Roo only hands a parent the bus while the child's own trip is active; off-trip the position
+stays at its last point and the bus is marked not running.
+
+`doormonitor/roorides/bus` example:
+```json
+{
+  "active": true,
+  "latitude": 28.4512,
+  "longitude": 77.0731,
+  "vehicle_id": "12345",
+  "bus_number": "DL1PC0000",
+  "driver_name": "…",
+  "speed": 24.0,
+  "address": "…",
+  "eta": "7",
+  "eta_unit": "min",
+  "eta_message": "Vehicle scheduled to arrive by …",
+  "status": "En route",
+  "device_datetime": "2026-10-22T14:40:11",
+  "updated": 1761143011.0
+}
+```
+
+*(Field values are illustrative. The exact Roo field names inside `liveTrackings` are confirmed
+from the first live trip; the integration logs that first payload and parses the names case-
+insensitively, so the bus shows up regardless.)*
+
+### Roo Commuter integration for Home Assistant
+
+1. Copy [`custom_components/roorides`](custom_components/roorides) into your Home Assistant
+   `custom_components/` and restart Home Assistant.
+2. Settings → Devices & services → Add integration → **Roo Commuter**. Enter the phone number
+   and password you use with the Roo Commuter app, then pick the child. Home Assistant signs in
+   to your Roo account and keeps the session alive by refreshing its token.
+3. Add a **Map** card to the wall dashboard showing `device_tracker.<child>_s_bus_location`, and
+   (optionally) the status sensor beside it. The bus appears while it is on its way to or from
+   school.
+
+This is unofficial: it calls the same parent API the Roo app calls, worked out from the app and
+Roo's web bundle. A Roo update can break it. Unlike some apps Roo uses refresh tokens, so Home
+Assistant signs in only once and then refreshes — it should not sign your phone out.

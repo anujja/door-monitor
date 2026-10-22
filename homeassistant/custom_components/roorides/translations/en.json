@@ -1,0 +1,44 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Roo Commuter",
+        "description": "Sign in with the phone number and password you use for the Roo Commuter app.",
+        "data": {
+          "username": "Phone number (or email)",
+          "password": "Password",
+          "topic": "MQTT topic prefix",
+          "use_socket": "Use the live-tracking socket for smoother updates"
+        }
+      },
+      "student": {
+        "title": "Which child?",
+        "data": { "student_id": "Child" }
+      },
+      "reauth_confirm": {
+        "title": "Sign in to Roo Commuter again",
+        "description": "Enter the password for {username}.",
+        "data": { "password": "Password" }
+      }
+    },
+    "error": {
+      "invalid_auth": "Wrong phone number or password.",
+      "cannot_connect": "Could not reach Roo Commuter.",
+      "no_students": "No children are linked to this account."
+    },
+    "abort": {
+      "already_configured": "That child's bus is already set up."
+    }
+  },
+  "entity": {
+    "device_tracker": {
+      "bus": { "name": "Location" }
+    },
+    "sensor": {
+      "status": { "name": "Status" }
+    },
+    "binary_sensor": {
+      "en_route": { "name": "En route" }
+    }
+  }
+}

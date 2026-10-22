@@ -74,6 +74,17 @@ All responses are JSON. Optional password (`?password=…` or `Authorization: Be
   marketing pushes off the screen. See
   [MQTT topics](homeassistant/mqtt-topics.md#mygate-notifications).
 
+### School bus tracking → MQTT (optional)
+- The **Roo Commuter integration for Home Assistant**
+  ([`homeassistant/custom_components/roorides`](homeassistant/custom_components/roorides)) signs
+  in to the parent's Roo (roorides.com) account, polls the child's live tracking, and while the
+  bus is underway follows it — over Roo's live-tracking socket when it can — publishing the bus's
+  position to `<deviceId>/roorides/bus`. It exposes a **device_tracker**, a status/ETA sensor and
+  an **en-route** binary_sensor.
+- A conditional Map card on the dashboard the tablet shows takes the screen over with the moving
+  bus while a pickup or drop is active, and an automation keeps the screen on for the trip. See
+  [MQTT topics](homeassistant/mqtt-topics.md#roo-commuter-bus-tracking).
+
 ### Motion-based wake (optional)
 - Wake on **camera motion** (MQTT), **doorbell press**, or **HA webhook**.
 

@@ -168,3 +168,34 @@
         data:
           tag: "mygate-{{ trigger.payload_json.id }}"
   mode: queued
+
+# 10) School bus (Roo Commuter integration): take the tablet over with the bus map and keep the
+#     screen on while a pickup/drop is active. The dashboard swap is a conditional card on the
+#     Overview view gated on this same binary_sensor; this part only handles the screen.
+#     Replace the entity id with your own `binary_sensor.<child>_s_bus_en_route`.
+- alias: "Tablet — keep on while the school bus is en route"
+  trigger:
+    - platform: state
+      entity_id: binary_sensor.kabir_jain_s_bus_en_route
+      to: "on"
+      id: start
+    - platform: state
+      entity_id: binary_sensor.kabir_jain_s_bus_en_route
+      from: "on"
+      to: "off"
+      id: end
+  action:
+    - choose:
+        - conditions: [{ condition: trigger, id: start }]
+          sequence:
+            - service: mqtt.publish
+              data:
+                topic: "doormonitor/command/wake"
+                payload: ""
+        - conditions: [{ condition: trigger, id: end }]
+          sequence:
+            - service: mqtt.publish
+              data:
+                topic: "doormonitor/command/sleep"
+                payload: ""
+  mode: queued

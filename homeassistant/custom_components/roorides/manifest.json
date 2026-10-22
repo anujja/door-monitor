@@ -1,0 +1,12 @@
+{
+  "domain": "roorides",
+  "name": "Roo Commuter",
+  "codeowners": [],
+  "config_flow": true,
+  "dependencies": ["mqtt"],
+  "documentation": "https://github.com/anujja/door-monitor/tree/main/homeassistant/custom_components/roorides",
+  "integration_type": "service",
+  "iot_class": "cloud_polling",
+  "requirements": [],
+  "version": "0.1.0"
+}
