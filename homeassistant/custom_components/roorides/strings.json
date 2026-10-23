@@ -35,7 +35,8 @@
       "bus": { "name": "Location" }
     },
     "sensor": {
-      "status": { "name": "Status" }
+      "status": { "name": "Status" },
+      "eta": { "name": "ETA" }
     },
     "binary_sensor": {
       "en_route": { "name": "En route" }

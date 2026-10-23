@@ -7,6 +7,6 @@
   "documentation": "https://github.com/anujja/door-monitor/tree/main/homeassistant/custom_components/roorides",
   "integration_type": "service",
   "iot_class": "cloud_polling",
-  "requirements": [],
+  "requirements": ["pywaze==1.2.4"],
   "version": "0.1.0"
 }

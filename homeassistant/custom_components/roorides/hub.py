@@ -58,6 +58,11 @@ _BUS = ("vehiclenumber", "vehiclename", "busnumber", "vehicle_reg_no", "vehicler
 _DRIVER = ("drivername", "driver_name", "driver")
 _MSG = ("message", "statusmessage")
 
+# Traffic-aware driving ETA to home, computed from the live position via Waze. Region "EU" is
+# Waze's rest-of-world routing server, which covers India (verified for Bengaluru).
+WAZE_REGION = "EU"
+ETA_INTERVAL = 45  # seconds between ETA recalculations while a trip is underway
+
 
 def _get(obj: dict[str, Any], names: tuple[str, ...]) -> Any:
     low = {k.lower(): v for k, v in obj.items()}
@@ -93,7 +98,7 @@ class BusState:
     driver_name: str | None = None
     speed: float | None = None
     address: str | None = None
-    eta: str | None = None
+    eta: int | None = None
     eta_unit: str | None = None
     eta_message: str | None = None
     status: str | None = None
@@ -121,6 +126,8 @@ class RooHub:
         self._cancel_poll = None
         self._socket: RooLiveSocket | None = None
         self._socket_task: asyncio.Task | None = None
+        self._waze_calc: Any = None
+        self._last_eta: float = 0.0
 
     # ── lifecycle ────────────────────────────────────────────────────────────────────────────
 
@@ -134,6 +141,9 @@ class RooHub:
             self._cancel_poll()
             self._cancel_poll = None
         await self._stop_socket()
+        if self._waze_calc is not None:
+            await self._waze_calc.close()
+            self._waze_calc = None
         await self._publish_available(False)
 
     # ── polling ──────────────────────────────────────────────────────────────────────────────
@@ -156,12 +166,14 @@ class RooHub:
                 self._broadcast()
             if self.use_socket:
                 self.hass.async_create_task(self._ensure_socket())
+            self._maybe_update_eta()
         else:
             await self._stop_socket()
             if self.state.active:
                 # Trip over: keep the last known position but mark the bus not underway.
                 self.state.active = False
                 self.state.status = "Not running"
+                self.state.eta = None
                 self._broadcast()
         interval = POLL_ACTIVE if self.state.active else POLL_IDLE
         self._cancel_poll = async_call_later(self.hass, interval, self._tick)
@@ -182,6 +194,50 @@ class RooHub:
         if done:
             last = done[-1]
             self.state.eta_message = last.get("message") or last.get("label")
+
+    # ── ETA to home (traffic-aware, via Waze) ────────────────────────────────────────────────
+
+    def _maybe_update_eta(self) -> None:
+        """Throttle to one ETA recalculation per ETA_INTERVAL while the bus has a position."""
+        if self.state.latitude is None or self.state.longitude is None:
+            return
+        now = time.time()
+        if now - self._last_eta < ETA_INTERVAL:
+            return
+        self._last_eta = now
+        self.hass.async_create_task(self._update_eta())
+
+    def _home_coords(self) -> tuple[float, float] | None:
+        zone = self.hass.states.get("zone.home")
+        if zone is None:
+            return None
+        lat, lng = zone.attributes.get("latitude"), zone.attributes.get("longitude")
+        if lat is None or lng is None:
+            return None
+        return (lat, lng)
+
+    def _waze(self) -> Any:
+        if self._waze_calc is None:
+            from pywaze.route_calculator import WazeRouteCalculator
+
+            self._waze_calc = WazeRouteCalculator(region=WAZE_REGION)
+        return self._waze_calc
+
+    async def _update_eta(self) -> None:
+        """Set a traffic-aware driving ETA (whole minutes) from the bus to home, via Waze."""
+        home = self._home_coords()
+        lat, lng = self.state.latitude, self.state.longitude
+        if home is None or lat is None or lng is None:
+            return
+        try:
+            routes = await self._waze().calc_routes(f"{lat},{lng}", f"{home[0]},{home[1]}")
+        except Exception as err:  # noqa: BLE001 - routing is best-effort; never break the poll
+            _LOGGER.debug("Roo ETA (Waze) failed: %s", err)
+            return
+        if routes:
+            self.state.eta = round(routes[0].duration)
+            self.state.eta_unit = "min"
+            self._broadcast()
 
     # ── parsing ──────────────────────────────────────────────────────────────────────────────
 
