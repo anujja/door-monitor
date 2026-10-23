@@ -94,8 +94,11 @@ class CommandHandler(
             val origin = "${base.scheme}://${base.authority}"
             origin + if (trimmed.startsWith("/")) trimmed else "/$trimmed"
         }
+        // Navigation is a dashboard URL change, not a wake. Don't bring the Activity to the
+        // foreground here: a `navigate` paired with `sleep` (e.g. when a bus trip ends) would
+        // otherwise re-wake the screen right after it was turned off. When the screen should come
+        // on, pair `navigate` with `wake` (as the trip-start automation does).
         KioskBus.emit(KioskCommand.NavigateTo(url))
-        bringDashboardToFront()
     }
 
     /**
