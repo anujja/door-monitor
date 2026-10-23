@@ -178,3 +178,23 @@ class RooApi:
             "GET", f"/api/LiveTrackingV3/{student_id}/{day.isoformat()}"
         )
         return data if isinstance(data, dict) else {}
+
+    async def trip_status(self, student_id: str | int) -> str | None:
+        """The child's current trip status, e.g. "Pickup Ongoing" / "Drop Ongoing".
+
+        Comes from the student list. The live-tracking arrays stay empty until the child is
+        aboard the bus, but this field flips as soon as the trip starts — so it's how we tell a
+        pickup or drop is underway even while the bus is still on its way to the stop.
+        """
+        for s in await self.students():
+            if str(s.get("studentid") or s.get("studentId") or s.get("id")) == str(student_id):
+                return s.get("tripStatus")
+        return None
+
+    async def trip_timeline(
+        self, student_id: str | int, day: date | None = None
+    ) -> list[dict[str, Any]]:
+        """The child's trip milestones for `day` (started, reached landmark, boarded, …)."""
+        day = day or date.today()
+        data = await self._authed("GET", f"/api/StudentTripInfoV3/{student_id}/{day.isoformat()}")
+        return data if isinstance(data, list) else []

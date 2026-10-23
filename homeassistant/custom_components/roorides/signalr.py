@@ -1,9 +1,13 @@
 """A small SignalR (JSON protocol) client over aiohttp, for Roo's live-tracking hub.
 
-Roo pushes bus positions from a SignalR hub at `livetrack.roorides.com/notify`, filtered by
-`vehicleId`. This is only as much of SignalR as that needs: negotiate, the JSON handshake, and
-reading `liveTracking` invocations. Roo's own share-map page connects with a throwaway token, so
-the hub does not appear to check it closely; we pass the real one regardless.
+Roo streams the bus's position from a SignalR hub at `livetrack.roorides.com/notify`. A parent
+connects with their **user id as the access token** and their **child's `studentId`** in the
+query; the server maps that to the child's currently-active trip and pushes `LiveTracking`
+messages for just that bus — so there's no need to know the vehicle id first, and it works even
+before the child boards (while a morning pickup bus is still on its way to the stop).
+
+This is only as much of SignalR as that needs: negotiate, the JSON handshake, and reading
+`LiveTracking` invocations. Roo's hub authenticates loosely (the "token" is just the user id).
 """
 
 from __future__ import annotations
@@ -22,21 +26,24 @@ _LOGGER = logging.getLogger(__name__)
 RECORD_SEP = "\x1e"
 HANDSHAKE = json.dumps({"protocol": "json", "version": 1}) + RECORD_SEP
 PING = json.dumps({"type": 6}) + RECORD_SEP
+# The hub pushes the parent's bus under this target (note the capital L).
+_TARGETS = ("LiveTracking", "liveTracking")
 
 
 class RooLiveSocket:
-    """Streams `liveTracking` messages for one vehicle until stopped."""
+    """Streams `LiveTracking` position messages for one child's bus until stopped."""
 
     def __init__(
         self,
         session: aiohttp.ClientSession,
-        vehicle_id: str | int,
+        student_id: str | int,
         token: str | None,
         on_message: Callable[[list[Any]], Awaitable[None]],
     ) -> None:
         self._session = session
-        self._vehicle_id = vehicle_id
-        self._token = token or "001"
+        self._student_id = student_id
+        # The hub's "access token" is the parent's user id, not the API's JWT.
+        self._token = str(token) if token else "0"
         self._on_message = on_message
         self._ws: aiohttp.ClientWebSocketResponse | None = None
 
@@ -58,7 +65,7 @@ class RooLiveSocket:
     async def run(self) -> None:
         """Connect, handshake and read messages until the socket closes. Raises on failure."""
         conn = await self._negotiate()
-        qs = f"vehicleId={self._vehicle_id}&access_token={self._token}"
+        qs = f"studentId={self._student_id}&access_token={self._token}"
         if conn:
             qs += f"&id={conn}"
         url = f"{LIVE_URL}/notify?{qs}"
@@ -84,7 +91,7 @@ class RooLiveSocket:
             except json.JSONDecodeError:
                 continue
             kind = obj.get("type")
-            if kind == 1 and obj.get("target") == "liveTracking":
+            if kind == 1 and obj.get("target") in _TARGETS:
                 args = obj.get("arguments") or []
                 # The hub sends the position list as the first argument.
                 await self._on_message(args[0] if args else args)

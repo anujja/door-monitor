@@ -1,9 +1,11 @@
-"""The running Roo account: polls live tracking, follows the bus, and publishes it.
+"""The running Roo account: watches the child's trip, follows the bus, and publishes it.
 
-While a child's trip is underway the hub polls `LiveTrackingV3` often and, when it learns the
-bus's `vehicleId`, also opens the live-tracking socket for smoother updates. Off-trip it polls
-slowly. Every update is pushed to the integration's entities and published on MQTT, so the
-tablet (and anything else) can follow the bus by subscribing — the project's MQTT-first habit.
+A parent sees the bus's live position over Roo's SignalR hub (see `signalr.py`), which streams it
+as soon as a trip starts — before the child boards too. So the hub works from the trip *status*:
+it polls the student's `tripStatus` ("Pickup Ongoing" / "Drop Ongoing") to know when a trip is
+underway, and while it is, keeps the socket open and pushes every position to the integration's
+entities and to MQTT, so the tablet (and anything else) can follow the bus by subscribing — the
+project's MQTT-first habit. Off-trip it polls slowly and holds the last known spot.
 """
 
 from __future__ import annotations
@@ -43,19 +45,18 @@ from .signalr import RooLiveSocket
 
 _LOGGER = logging.getLogger(__name__)
 
-# Case-insensitive field synonyms. Roo's exact casing is confirmed from the first live payload,
-# which the hub logs once; until then we match generously so the bus still shows.
+# Case-insensitive field synonyms for a hub position object. Roo's live socket sends
+# latitude/longitude/vehicleId/vehicleNumber/message/deviceDatetime; the synonyms also cover the
+# REST shapes in case we read a position from there.
 _LAT = ("latitude", "lat")
 _LNG = ("longitude", "lng", "long", "lon")
 _VID = ("vehicleid", "vehicle_id")
 _SPEED = ("speed",)
 _ADDR = ("address", "currentaddress", "fulladdress")
 _WHEN = ("devicedatetime", "datetime", "timestamp", "time")
-_BUS = ("busnumber", "vehiclenumber", "vehicle_reg_no", "vehicleregno", "busno")
+_BUS = ("vehiclenumber", "vehiclename", "busnumber", "vehicle_reg_no", "vehicleregno", "busno")
 _DRIVER = ("drivername", "driver_name", "driver")
-_ETA = ("eta",)
-_ETA_UNIT = ("etaunit",)
-_ETA_MSG = ("etaextramessage", "message")
+_MSG = ("message", "statusmessage")
 
 
 def _get(obj: dict[str, Any], names: tuple[str, ...]) -> Any:
@@ -71,6 +72,13 @@ def _num(value: Any) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def _plausible(lat: float, lng: float) -> bool:
+    """Reject Roo's "no fix" sentinels so a status-only message can't erase the real position."""
+    if abs(lat) > 90 or abs(lng) > 180:
+        return False
+    return (lat, lng) not in ((0.0, 0.0), (-1.0, -1.0))
 
 
 @dataclass
@@ -113,8 +121,6 @@ class RooHub:
         self._cancel_poll = None
         self._socket: RooLiveSocket | None = None
         self._socket_task: asyncio.Task | None = None
-        self._socket_vehicle: str | None = None
-        self._logged_raw = False
 
     # ── lifecycle ────────────────────────────────────────────────────────────────────────────
 
@@ -135,10 +141,28 @@ class RooHub:
     async def _tick(self, _now: Any = None) -> None:
         try:
             await self._refresh_token_if_due()
-            raw = await self.api.live_tracking(self.student_id, date.today())
-            self._ingest_live_tracking(raw)
+            status = await self.api.trip_status(self.student_id)
         except RooError as err:
-            _LOGGER.warning("Roo live-tracking poll failed: %s", err)
+            _LOGGER.warning("Roo trip poll failed: %s", err)
+            status = self.state.status if self.state.active else None
+        ongoing = bool(status) and "ongoing" in status.lower()
+        if ongoing:
+            first = not self.state.active
+            self.state.active = True
+            if status:
+                self.state.status = status
+            if first:
+                await self._apply_timeline()
+                self._broadcast()
+            if self.use_socket:
+                self.hass.async_create_task(self._ensure_socket())
+        else:
+            await self._stop_socket()
+            if self.state.active:
+                # Trip over: keep the last known position but mark the bus not underway.
+                self.state.active = False
+                self.state.status = "Not running"
+                self._broadcast()
         interval = POLL_ACTIVE if self.state.active else POLL_IDLE
         self._cancel_poll = async_call_later(self.hass, interval, self._tick)
 
@@ -148,30 +172,22 @@ class RooHub:
             _LOGGER.debug("Refreshing Roo token")
             await self.api.refresh()
 
-    def _ingest_live_tracking(self, raw: dict[str, Any]) -> None:
-        trackings = raw.get("liveTrackings") or []
-        if not self._logged_raw and trackings:
-            _LOGGER.info("Roo first live payload (confirming field names): %s", json.dumps(raw)[:1500])
-            self._logged_raw = True
-        entry = self._pick(trackings)
-        if entry:
-            self._apply(entry, active=True)
-            self._update_eta(raw)
-            if self.use_socket:
-                self.hass.async_create_task(self._ensure_socket())
-        else:
-            # Trip over or not started: keep the last position but mark the bus not underway.
-            if self.state.active:
-                self.state.active = False
-                self.state.status = "Not running"
-                self._broadcast()
-            self.hass.async_create_task(self._stop_socket())
+    async def _apply_timeline(self) -> None:
+        """Set a human status hint (e.g. "Pickup started") from the latest reached milestone."""
+        try:
+            timeline = await self.api.trip_timeline(self.student_id, date.today())
+        except RooError:
+            return
+        done = [e for e in timeline if isinstance(e, dict) and e.get("checked")]
+        if done:
+            last = done[-1]
+            self.state.eta_message = last.get("message") or last.get("label")
 
     # ── parsing ──────────────────────────────────────────────────────────────────────────────
 
-    def _pick(self, trackings: list[Any]) -> dict[str, Any] | None:
+    def _pick(self, positions: list[Any]) -> dict[str, Any] | None:
         """Choose our vehicle's entry (by id if we know it), else the first with coordinates."""
-        entries = [t for t in trackings if isinstance(t, dict)]
+        entries = [t for t in positions if isinstance(t, dict)]
         if self.state.vehicle_id:
             for t in entries:
                 if str(_get(t, _VID)) == self.state.vehicle_id:
@@ -185,7 +201,7 @@ class RooHub:
         lat, lng = _num(_get(entry, _LAT)), _num(_get(entry, _LNG))
         vid = _get(entry, _VID)
         self.state.active = active
-        if lat is not None and lng is not None:
+        if lat is not None and lng is not None and _plausible(lat, lng):
             self.state.latitude, self.state.longitude = lat, lng
         if vid is not None:
             self.state.vehicle_id = str(vid)
@@ -194,31 +210,24 @@ class RooHub:
         self.state.bus_number = _get(entry, _BUS) or self.state.bus_number
         self.state.driver_name = _get(entry, _DRIVER) or self.state.driver_name
         self.state.device_datetime = _get(entry, _WHEN)
-        self.state.status = "En route"
+        if msg := _get(entry, _MSG):
+            self.state.status = msg
         self.state.updated = time.time()
         self._broadcast()
-
-    def _update_eta(self, raw: dict[str, Any]) -> None:
-        for source in (raw.get("liveTrackings") or []) + (raw.get("transportActivities") or []):
-            if isinstance(source, dict) and (eta := _get(source, _ETA)) is not None:
-                self.state.eta = str(eta)
-                self.state.eta_unit = _get(source, _ETA_UNIT)
-                self.state.eta_message = _get(source, _ETA_MSG)
-                return
 
     # ── live socket ──────────────────────────────────────────────────────────────────────────
 
     async def _ensure_socket(self) -> None:
-        vid = self.state.vehicle_id
-        if not vid or (self._socket_task and self._socket_vehicle == vid):
+        if self._socket_task is not None and not self._socket_task.done():
             return
-        await self._stop_socket()
-        self._socket_vehicle = vid
         self._socket = RooLiveSocket(
-            async_get_clientsession(self.hass), vid, self.api.access_token, self._on_socket
+            async_get_clientsession(self.hass),
+            self.student_id,
+            self.api.user_id,
+            self._on_socket,
         )
         self._socket_task = self.hass.async_create_background_task(
-            self._socket_loop(), f"roorides socket {vid}"
+            self._socket_loop(), f"roorides socket {self.student_id}"
         )
 
     async def _socket_loop(self) -> None:
@@ -229,7 +238,7 @@ class RooHub:
             except Exception as err:  # noqa: BLE001 - never let the socket kill the task
                 _LOGGER.debug("Roo live socket dropped: %s", err)
             if self.state.active:
-                await asyncio.sleep(5)
+                await asyncio.sleep(3)
 
     async def _on_socket(self, positions: Any) -> None:
         entries = positions if isinstance(positions, list) else [positions]
@@ -238,7 +247,6 @@ class RooHub:
             self._apply(entry, active=True)
 
     async def _stop_socket(self) -> None:
-        self._socket_vehicle = None
         if self._socket is not None:
             await self._socket.close()
             self._socket = None
