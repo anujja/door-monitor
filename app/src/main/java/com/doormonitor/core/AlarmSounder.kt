@@ -2,7 +2,6 @@ package com.doormonitor.core
 
 import android.content.Context
 import android.media.AudioAttributes
-import android.media.AudioManager
 import android.media.MediaPlayer
 import android.media.RingtoneManager
 import android.os.Handler
@@ -11,15 +10,12 @@ import com.doormonitor.R
 
 /**
  * An audible alarm on demand (MQTT `command/alarm`, HTTP `/alarm`): loops the system alarm tone
- * on the alarm stream, turned up to full for the duration and restored afterwards, then stops by
- * itself. Used for heads-ups that must be heard across the flat, e.g. the school bus passing a
+ * on the alarm stream, at whatever alarm volume is set on the tablet, then stops by itself. Used for heads-ups that must be heard across the flat, e.g. the school bus passing a
  * landmark a few minutes before the stop.
  */
 class AlarmSounder(private val appContext: Context) {
     private val main = Handler(Looper.getMainLooper())
-    private val audio = appContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
     private var player: MediaPlayer? = null
-    private var savedVolume: Int? = null
     private val stopRunnable = Runnable { stop() }
 
     /** Sound the alarm for [seconds]; a repeat call restarts the countdown. */
@@ -36,8 +32,6 @@ class AlarmSounder(private val appContext: Context) {
             main.removeCallbacks(stopRunnable)
             player?.let { p -> runCatching { p.stop(); p.release() } }
             player = null
-            savedVolume?.let { audio.setStreamVolume(AudioManager.STREAM_ALARM, it, 0) }
-            savedVolume = null
         }
     }
 
@@ -46,12 +40,6 @@ class AlarmSounder(private val appContext: Context) {
             .setUsage(AudioAttributes.USAGE_ALARM)
             .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
             .build()
-        if (savedVolume == null) {
-            savedVolume = audio.getStreamVolume(AudioManager.STREAM_ALARM)
-            audio.setStreamVolume(
-                AudioManager.STREAM_ALARM, audio.getStreamMaxVolume(AudioManager.STREAM_ALARM), 0
-            )
-        }
         runCatching {
             val tone = RingtoneManager.getActualDefaultRingtoneUri(appContext, RingtoneManager.TYPE_ALARM)
                 ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
