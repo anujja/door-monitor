@@ -27,6 +27,7 @@ import org.json.JSONObject
  *   <base>/command/reload
  *   <base>/command/dashboard            return to the dashboard (close any camera view)
  *   <base>/command/navigate             load a dashboard path/URL (e.g. /roo-bus), then back
+ *   <base>/command/alarm                (optional seconds payload) sound the alarm; OFF stops it
  *   <base>/command/camera               <cameraId>
  *   <base>/command/motion               any payload -> motion wake
  *   <base>/command/doorbell             any payload -> doorbell wake
@@ -158,6 +159,10 @@ class MqttManager(
             "reload" -> handler.reloadDashboard()
             "dashboard" -> handler.returnToDashboard()
             "navigate" -> if (payload.isNotEmpty()) handler.navigateTo(payload)
+            "alarm" -> when {
+                payload.equals("OFF", true) -> handler.alarmOff()
+                else -> payload.toIntOrNull()?.let { handler.alarm(it) } ?: handler.alarm()
+            }
             "camera" -> if (payload.isNotEmpty()) handler.showCamera(payload)
             "motion" -> handler.motionWake()
             "doorbell" -> handler.doorbellWake()

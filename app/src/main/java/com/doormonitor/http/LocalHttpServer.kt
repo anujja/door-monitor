@@ -21,6 +21,7 @@ import org.json.JSONObject
  *   GET /dashboard     return to the dashboard (close any camera view)
  *   GET /navigate?url=/roo-bus     load a dashboard path/URL (switch view, then back)
  *   GET /camera?id=front_door      open a camera full-screen
+ *   GET /alarm?seconds=20          sound the alarm (default 20 s); /alarm?off stops it
  *   GET /event?type=motion|doorbell  motion/doorbell wake (used by HA webhook)
  *
  * Optional password: when [passwordProvider] returns non-empty, requests must include it as
@@ -64,6 +65,12 @@ class LocalHttpServer(
                         ?: return json(Response.Status.BAD_REQUEST, error("missing url"))
                     handler.navigateTo(target)
                     ok("navigate", JSONObject().put("url", target))
+                }
+                "/alarm" -> {
+                    val secs = params["seconds"]?.firstOrNull()?.toIntOrNull()
+                    if (params["off"] != null) handler.alarmOff()
+                    else if (secs != null) handler.alarm(secs) else handler.alarm()
+                    ok("alarm")
                 }
                 "/camera" -> {
                     val id = params["id"]?.firstOrNull()

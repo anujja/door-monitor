@@ -73,6 +73,13 @@ class CommandHandler(
         appContext.startActivity(intent)
     }
 
+    private val alarm = AlarmSounder(appContext)
+
+    /** Sound the alarm for [seconds] (a loud, looping alarm tone), or stop it early. */
+    fun alarm(seconds: Int = AlarmSounder.DEFAULT_SECONDS) = alarm.start(seconds)
+
+    fun alarmOff() = alarm.stop()
+
     fun reloadDashboard() = KioskBus.emit(KioskCommand.ReloadDashboard)
 
     /** Dismiss any camera overlay / full-screen camera and bring the dashboard back. */
