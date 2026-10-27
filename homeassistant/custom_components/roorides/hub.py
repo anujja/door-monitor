@@ -149,6 +149,16 @@ class RooHub:
     # ── polling ──────────────────────────────────────────────────────────────────────────────
 
     async def _tick(self, _now: Any = None) -> None:
+        # Always schedule the next poll, even if this one fails unexpectedly — a single stray
+        # exception here used to end polling for good, so a later trip went unnoticed.
+        try:
+            await self._poll()
+        except Exception:  # noqa: BLE001
+            _LOGGER.exception("Roo trip poll crashed")
+        interval = POLL_ACTIVE if self.state.active else POLL_IDLE
+        self._cancel_poll = async_call_later(self.hass, interval, self._tick)
+
+    async def _poll(self) -> None:
         try:
             await self._refresh_token_if_due()
             status = await self.api.trip_status(self.student_id)
@@ -175,8 +185,6 @@ class RooHub:
                 self.state.status = "Not running"
                 self.state.eta = None
                 self._broadcast()
-        interval = POLL_ACTIVE if self.state.active else POLL_IDLE
-        self._cancel_poll = async_call_later(self.hass, interval, self._tick)
 
     async def _refresh_token_if_due(self) -> None:
         expiry = self.api.token_expiry

@@ -15,6 +15,7 @@ arrays come back empty. Everything here is read-only apart from the sign-in itse
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import binascii
 from datetime import date
@@ -98,8 +99,8 @@ class RooApi:
                     return json.loads(text)
                 except json.JSONDecodeError:
                     return text
-        except aiohttp.ClientError as err:
-            raise RooError(f"Could not reach Roo: {err}") from err
+        except (aiohttp.ClientError, asyncio.TimeoutError) as err:
+            raise RooError(f"Could not reach Roo: {err!r}") from err
 
     async def _authed(self, method: str, url: str, *, json_body: Any = None) -> Any:
         """A request that renews the session once if the token has gone stale."""
