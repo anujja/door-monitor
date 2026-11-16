@@ -258,6 +258,14 @@ screen on) while a trip is active, then back to the normal dashboard when it end
 Roo only hands a parent the bus while the child's own trip is active; off-trip the position
 stays at its last point and the bus is marked not running.
 
+The integration's **Stop tracking** `button` (available only while a trip is active) drops the
+journey in progress, e.g. when the child didn't board or the driver never ends the trip in Roo.
+The bus is then marked not underway (`active: false`, status `Tracking stopped`), so the
+en-route automation sends the tablet back to its dashboard. The integration keeps polling
+slowly and starts tracking again by itself with the next journey, i.e. once Roo's trip status
+moves off the stopped one (`Drop Ongoing` → ended, or → `Pickup Ongoing`). The stop survives a
+Home Assistant restart.
+
 `doormonitor/roorides/bus` example:
 ```json
 {
@@ -297,6 +305,9 @@ insensitively, so the bus shows up regardless.)*
    `command/dashboard` to close the doorbell camera when the visitor leaves. See the Roo
    automations in [`automations.yaml`](automations.yaml). HA's sections dashboards cap card
    width, so the bus map needs a **panel** view to go edge to edge.
+4. Below the map, a `conditional` card (shown while the **en route** sensor is `on`) holding a
+   `tile` for the **Stop tracking** button, with `tap_action: perform-action button.press` and a
+   `confirmation`, lets you dismiss a journey from the tablet.
 
 This is unofficial: it calls the same parent API the Roo app calls, worked out from the app and
 Roo's web bundle. A Roo update can break it. Unlike some apps Roo uses refresh tokens, so Home

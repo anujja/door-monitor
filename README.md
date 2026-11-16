@@ -80,13 +80,16 @@ All responses are JSON. Optional password (`?password=…` or `Authorization: Be
   ([`homeassistant/custom_components/roorides`](homeassistant/custom_components/roorides)) signs
   in to the parent's Roo (roorides.com) account, polls the child's live tracking, and while the
   bus is underway follows it — over Roo's live-tracking socket when it can — publishing the bus's
-  position to `<deviceId>/roorides/bus`. It exposes a **device_tracker**, a status/ETA sensor and
-  an **en-route** binary_sensor.
+  position to `<deviceId>/roorides/bus`. It exposes a **device_tracker**, a status/ETA sensor,
+  an **en-route** binary_sensor and a **Stop tracking** button.
 - While a pickup or drop is active, the tablet switches itself to a dedicated full-screen bus
   **map** (via the `navigate` command) and keeps the screen on; it returns to the normal
   dashboard when the trip ends. A doorbell during the trip shows the camera, then auto-returns
   to the map once the visitor leaves (via the `dashboard` command). See
   [MQTT topics](homeassistant/mqtt-topics.md#roo-commuter-bus-tracking).
+- A **Stop tracking** button on the bus map ends tracking of the journey in progress — for when
+  the child didn't board or Roo never closes the trip. The tablet goes back to its dashboard, and
+  tracking resumes on its own with the next journey.
 
 ### Motion-based wake (optional)
 - Wake on **camera motion** (MQTT), **doorbell press**, or **HA webhook**.

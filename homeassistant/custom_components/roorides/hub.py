@@ -6,6 +6,12 @@ it polls the student's `tripStatus` ("Pickup Ongoing" / "Drop Ongoing") to know 
 underway, and while it is, keeps the socket open and pushes every position to the integration's
 entities and to MQTT, so the tablet (and anything else) can follow the bus by subscribing — the
 project's MQTT-first habit. Off-trip it polls slowly and holds the last known spot.
+
+A parent can also stop tracking the journey in progress (the dashboard's "Stop tracking" button),
+e.g. when the child didn't board or Roo never closes the trip. That journey is then treated as
+over: the bus is marked not underway, so the tablet goes back to its dashboard. Tracking picks up
+again on its own with the next journey — once Roo's trip status moves off the stopped one. The
+stop survives a Home Assistant restart.
 """
 
 from __future__ import annotations
@@ -25,6 +31,7 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.event import async_call_later
+from homeassistant.helpers.storage import Store
 
 from .api import RooApi, RooError
 from .const import (
@@ -36,6 +43,7 @@ from .const import (
     CONF_USE_SOCKET,
     CONF_USERNAME,
     DEFAULT_TOPIC,
+    DOMAIN,
     POLL_ACTIVE,
     POLL_IDLE,
     SIGNAL_UPDATE,
@@ -62,6 +70,9 @@ _MSG = ("message", "statusmessage")
 # Waze's rest-of-world routing server, which covers India (verified for Bengaluru).
 WAZE_REGION = "EU"
 ETA_INTERVAL = 45  # seconds between ETA recalculations while a trip is underway
+
+STATUS_STOPPED = "Tracking stopped"
+STORAGE_VERSION = 1
 
 
 def _get(obj: dict[str, Any], names: tuple[str, ...]) -> Any:
@@ -128,10 +139,21 @@ class RooHub:
         self._socket_task: asyncio.Task | None = None
         self._waze_calc: Any = None
         self._last_eta: float = 0.0
+        # Roo's raw tripStatus for the journey underway ("Pickup Ongoing" / "Drop Ongoing").
+        # `state.status` can't stand in for it: the live socket overwrites that with its messages.
+        self._trip_status: str | None = None
+        # The tripStatus of the journey the user stopped tracking, until that journey is over.
+        self._stopped_trip: str | None = None
+        self._store: Store[dict[str, Any]] = Store(
+            hass, STORAGE_VERSION, f"{DOMAIN}.{entry.entry_id}"
+        )
 
     # ── lifecycle ────────────────────────────────────────────────────────────────────────────
 
     async def async_start(self) -> None:
+        if (saved := await self._store.async_load()) and saved.get("stopped_trip"):
+            self._stopped_trip = saved["stopped_trip"]
+            self.state.status = STATUS_STOPPED
         await self.api.login()
         await self._publish_available(True)
         await self._tick()
@@ -145,6 +167,29 @@ class RooHub:
             await self._waze_calc.close()
             self._waze_calc = None
         await self._publish_available(False)
+
+    async def async_stop_tracking(self) -> None:
+        """Stop following the journey underway; the next journey is tracked as usual."""
+        if not self.state.active or not self._trip_status:
+            raise HomeAssistantError("No bus journey is being tracked right now")
+        self._stopped_trip = self._trip_status
+        await self._store.async_save({"stopped_trip": self._stopped_trip})
+        _LOGGER.info(
+            "Stopped tracking %s's bus for this journey (%s); resuming with the next one",
+            self.student_name, self._stopped_trip,
+        )
+        # Mark the bus not underway before closing the socket, so its loop doesn't reconnect.
+        self.state.active = False
+        await self._stop_socket()
+        self.state.status = STATUS_STOPPED
+        self.state.eta = None
+        self._broadcast()
+
+    async def _resume_tracking(self) -> None:
+        self._stopped_trip = None
+        await self._store.async_save({"stopped_trip": None})
+        _LOGGER.info("The stopped bus journey is over; tracking %s's bus again", self.student_name)
+        self.state.status = "Not running"
 
     # ── polling ──────────────────────────────────────────────────────────────────────────────
 
@@ -164,11 +209,20 @@ class RooHub:
             status = await self.api.trip_status(self.student_id)
         except RooError as err:
             _LOGGER.warning("Roo trip poll failed: %s", err)
-            status = self.state.status if self.state.active else None
+            if self._stopped_trip is not None:
+                return  # can't tell whether the stopped journey is over yet; stay stopped
+            status = self._trip_status if self.state.active else None
         ongoing = bool(status) and "ongoing" in status.lower()
+        if self._stopped_trip is not None:
+            if ongoing and status == self._stopped_trip:
+                return  # still the journey the user stopped tracking
+            await self._resume_tracking()
+            if not ongoing:
+                self._broadcast()  # "Tracking stopped" → "Not running"; a new journey broadcasts below
         if ongoing:
             first = not self.state.active
             self.state.active = True
+            self._trip_status = status
             if status:
                 self.state.status = status
             if first:
@@ -179,6 +233,7 @@ class RooHub:
             self._maybe_update_eta()
         else:
             await self._stop_socket()
+            self._trip_status = None
             if self.state.active:
                 # Trip over: keep the last known position but mark the bus not underway.
                 self.state.active = False
@@ -242,7 +297,7 @@ class RooHub:
         except Exception as err:  # noqa: BLE001 - routing is best-effort; never break the poll
             _LOGGER.debug("Roo ETA (Waze) failed: %s", err)
             return
-        if routes:
+        if routes and self.state.active:  # not if tracking stopped while Waze was answering
             self.state.eta = round(routes[0].duration)
             self.state.eta_unit = "min"
             self._broadcast()
@@ -282,6 +337,8 @@ class RooHub:
     # ── live socket ──────────────────────────────────────────────────────────────────────────
 
     async def _ensure_socket(self) -> None:
+        if not self.state.active:
+            return  # tracking was stopped before this got to run
         if self._socket_task is not None and not self._socket_task.done():
             return
         self._socket = RooLiveSocket(
@@ -305,6 +362,8 @@ class RooHub:
                 await asyncio.sleep(3)
 
     async def _on_socket(self, positions: Any) -> None:
+        if not self.state.active:
+            return  # a late message after tracking stopped
         entries = positions if isinstance(positions, list) else [positions]
         entry = self._pick([e for e in entries if isinstance(e, dict)])
         if entry:

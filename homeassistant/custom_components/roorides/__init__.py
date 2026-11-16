@@ -15,7 +15,7 @@ from homeassistant.core import HomeAssistant
 
 from .hub import RooHub
 
-PLATFORMS = [Platform.DEVICE_TRACKER, Platform.SENSOR, Platform.BINARY_SENSOR]
+PLATFORMS = [Platform.DEVICE_TRACKER, Platform.SENSOR, Platform.BINARY_SENSOR, Platform.BUTTON]
 
 type RooConfigEntry = ConfigEntry[RooHub]
 

@@ -40,6 +40,9 @@
     },
     "binary_sensor": {
       "en_route": { "name": "En route" }
+    },
+    "button": {
+      "stop_tracking": { "name": "Stop tracking" }
     }
   }
 }
