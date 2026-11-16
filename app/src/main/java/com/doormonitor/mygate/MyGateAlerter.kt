@@ -5,6 +5,7 @@ import android.media.AudioAttributes
 import android.media.AudioManager
 import android.media.MediaPlayer
 import android.os.PowerManager
+import androidx.annotation.RawRes
 import com.doormonitor.R
 import com.doormonitor.core.DiskLog
 import kotlinx.coroutines.CoroutineScope
@@ -81,7 +82,8 @@ object MyGateAlerts {
 
 /**
  * The kiosk's own reaction to MyGate alerts arriving on MQTT: wake the screen, ring a chime and
- * show a card, then let the screen sleep again.
+ * show a card, then let the screen sleep again. A visitor asking to be let in gets its own,
+ * brighter tone ([R.raw.mygate_approval]) so it stands out from routine check-ins.
  *
  * Driven by the `<base>/mygate/…` topics rather than by MyGate directly, so the tablet is just
  * one more subscriber. A visitor waiting at the gate gets Approve / Deny buttons when the alert
@@ -203,7 +205,10 @@ class MyGateAlerter(
         MyGateAlerts.show(alert)
         // An update is MyGate revising (or resolving) an alert it already sent: refresh the
         // card, but don't ring for the same visitor twice.
-        if (!update) playChime()
+        if (!update) {
+            val asksForEntry = type == MyGateNotificationListener.TYPE_APPROVAL || responses.isNotEmpty()
+            playChime(if (asksForEntry) R.raw.mygate_approval else R.raw.mygate_chime)
+        }
         keepUpUntil(expiresAt)
     }
 
@@ -306,14 +311,14 @@ class MyGateAlerter(
 
     private fun secondsFor(ms: Long) = ((ms + 999) / 1000).toInt().coerceAtLeast(1)
 
-    private fun playChime() {
+    private fun playChime(@RawRes sound: Int) {
         val attrs = AudioAttributes.Builder()
             .setUsage(AudioAttributes.USAGE_NOTIFICATION_EVENT)
             .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
             .build()
         val audio = appContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
         runCatching {
-            MediaPlayer.create(appContext, R.raw.mygate_chime, attrs, audio.generateAudioSessionId())
+            MediaPlayer.create(appContext, sound, attrs, audio.generateAudioSessionId())
                 ?.apply {
                     setOnCompletionListener { it.release() }
                     start()

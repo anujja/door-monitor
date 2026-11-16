@@ -67,7 +67,9 @@ Two things can publish MyGate's alerts to these topics, in the same JSON shape:
 
 Use one or the other. With both, every visitor is announced twice.
 
-The tablet is one of the subscribers. On each message it plays a chime and shows a card: the
+The tablet is one of the subscribers. On each message it plays a chime and shows a card. Entry
+approvals (`event_type` `approval`, or any alert with `responses`) get their own brighter, rising
+tone; everything else gets the usual ding-dong, and an `update` rings nothing. On the card, the
 visitor's photo, name and where they're from (`visitor`) come first, whenever they are sent.
 - An alert with `responses` (a visitor waiting at the gate) gets **Approve / Deny** buttons,
   plus **Leave at gate** for deliveries. It stays up until the visitor is answered, from the
